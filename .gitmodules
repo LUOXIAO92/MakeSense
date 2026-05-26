@@ -1,0 +1,4 @@
+[submodule "transalign"]
+	path = transalign
+	url = https://github.com/bebing93/transalign.git
+	ignore = untracked
