@@ -11,7 +11,7 @@ Currently, the repository provides the dataset builder pipeline and training-dat
 Target: train an omni / multimodal model toward streaming simultaneous speech translation behavior with an additional ASR/transcription capability.
 
 Inspired by following papers:
-- sense-unit + window/time-pressure ASR: [InfiniSST: Simultaneous Translation of Unbounded Speech with Large Language Model](https://arxiv.org/pdf/2503.02969)
+- Infinit input window/time-pressure simultaneous translation: [InfiniSST: Simultaneous Translation of Unbounded Speech with Large Language Model](https://arxiv.org/pdf/2503.02969)
 - sense-unit translation: [SIMULSENSE: SENSE-DRIVEN INTERPRETING FOR EFFICIENT SIMULTANEOUS SPEECH TRANSLATION](https://arxiv.org/abs/2509.21932)
 
 In this project:
@@ -60,8 +60,8 @@ Available now:
 TODO:
 - [ ] **High priority:** test the thin LoRA trainer path with `examples/train_lora.py` on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly.
 - [ ] **High priority:** run LoRA training for `Qwen/Qwen2.5-Omni-3B` after the trainer sanity check passes.
+- [ ] **Second-highest priority:** add an inference backend for running the trained streaming model.
 - [ ] Add hot words and hot translations support for training and inference contexts.
-- [ ] Add an inference backend for running the trained streaming model.
 
 ### LoRA training entry
 
@@ -88,12 +88,12 @@ python examples/pipeline_2_initialize_cache.py
 # Use this when testing one-pass multimodal translation behavior.
 python examples/pipeline_3_a_asr_translation_omni.py
 
-# 3b-1. Optional staged ASR-only path.
+# 3b-1. ASR-only path.
 # This fills source transcript artifacts in the cache.
 python examples/pipeline_3_b1_asr.py
 
-# 3b-2. Staged raw translation from the ASR cache.
-# Default is text-only; optional audio-assisted mode is controlled in the script.
+# 3b-2. Raw translation from the ASR cache.
+# Default is text-only; optional audio-assisted mode is controlled in the script, audio supported omni model is needed.
 python examples/pipeline_3_b2_asr_text_translation.py
 
 # 4. Forced alignment for source transcription.
