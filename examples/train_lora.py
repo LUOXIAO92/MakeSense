@@ -1,10 +1,13 @@
 """Train a MakeSense LoRA adapter from final pipeline-9 dataset output."""
+
 import sys
 sys.path.append("src")
+
 from pathlib import Path
 
-from unsloth import FastModel
-from transformers import Qwen2_5OmniProcessor
+import torch
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from transformers import AutoModelForMultimodalLM, AutoProcessor, BitsAndBytesConfig
 
 from train import LoraTrainConfig, TrainingDataConfig, train_lora
 
@@ -19,26 +22,24 @@ SEED = 4021
 
 
 # --- Model / LoRA controls ---
-MODEL_NAME = "Qwen/Qwen2.5-Omni-3B"
+MODEL_NAME = "google/gemma-4-E2B-it"
 OUTPUT_DIR = Path("outputs") / "makesense_lora"
-MAX_SEQ_LENGTH = 8192
+MAX_SEQ_LENGTH = 32000
 LOAD_IN_4BIT = True
+AUDIO_SAMPLING_RATE = 16000
+AUDIO_CHUNK_SECONDS = 1.0
 
 LORA_R = 16
 LORA_ALPHA = 16
 LORA_DROPOUT = 0.0
 LORA_TARGET_MODULES = (
-    "q_proj",
-    "k_proj",
-    "v_proj",
-    "o_proj",
-    "gate_proj",
-    "up_proj",
-    "down_proj",
+    r"^model\.language_model\.layers\.\d+\."
+    r"(self_attn\.(q_proj|k_proj|v_proj|o_proj)|"
+    r"mlp\.(gate_proj|up_proj|down_proj))$"
 )
 
 
-# --- Optimizer / loop controls ---
+# --- Trainer controls ---
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 0.0
 NUM_TRAIN_EPOCHS = 1
@@ -50,34 +51,49 @@ LOGGING_STEPS = 1
 EVAL_STEPS = 100
 SAVE_STEPS = 500
 MAX_GRAD_NORM = 1.0
-ASSISTANT_ONLY_LOSS = True
-PACKING = False
-OPTIM = "adamw_8bit"
-REPORT_TO = "none"
-PRINT_SAMPLE = True
-TRAINING_MODE = "text_only"
+SAMPLE_GENERATION_STEPS = 12
+SAMPLE_GENERATION_MAX_NEW_TOKENS = 256
+SAMPLE_EVALUATION_RECORD_COUNT = 1
 
 
 def load_model_and_processor():
-    """Load Qwen2.5-Omni with Unsloth FastModel and explicit processor."""
+    """Load the target model/processor and attach PEFT LoRA."""
 
-    model, _ = FastModel.from_pretrained(
-        model_name=MODEL_NAME,
-        max_seq_length=MAX_SEQ_LENGTH,
-        dtype=None,
-        load_in_4bit=LOAD_IN_4BIT,
+    processor = AutoProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True, dtype=torch.bfloat16)
+    quantization_config = None
+    if LOAD_IN_4BIT:
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            llm_int8_skip_modules=[
+                "lm_head",
+                "audio_tower",
+                "embed_audio",
+                "model.audio_tower",
+                "model.embed_audio",
+            ],
+        )
+    model = AutoModelForMultimodalLM.from_pretrained(
+        MODEL_NAME,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        quantization_config=quantization_config,
+        trust_remote_code=True,
     )
-    processor = Qwen2_5OmniProcessor.from_pretrained(MODEL_NAME)
-    model = FastModel.get_peft_model(
-        model,
+    if LOAD_IN_4BIT:
+        model = prepare_model_for_kbit_training(model)
+    lora_config = LoraConfig(
         r=LORA_R,
-        target_modules=list(LORA_TARGET_MODULES),
         lora_alpha=LORA_ALPHA,
         lora_dropout=LORA_DROPOUT,
         bias="none",
-        use_gradient_checkpointing="unsloth",
-        random_state=SEED,
+        task_type="CAUSAL_LM",
+        target_modules=LORA_TARGET_MODULES,
     )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
     return model, processor
 
 
@@ -93,6 +109,8 @@ def main() -> None:
     train_config = LoraTrainConfig(
         output_dir=OUTPUT_DIR,
         max_seq_length=MAX_SEQ_LENGTH,
+        audio_sampling_rate=AUDIO_SAMPLING_RATE,
+        audio_chunk_seconds=AUDIO_CHUNK_SECONDS,
         learning_rate=LEARNING_RATE,
         weight_decay=WEIGHT_DECAY,
         num_train_epochs=NUM_TRAIN_EPOCHS,
@@ -104,12 +122,9 @@ def main() -> None:
         eval_steps=EVAL_STEPS,
         save_steps=SAVE_STEPS,
         max_grad_norm=MAX_GRAD_NORM,
-        assistant_only_loss=ASSISTANT_ONLY_LOSS,
-        packing=PACKING,
-        optim=OPTIM,
-        report_to=REPORT_TO,
-        print_sample=PRINT_SAMPLE,
-        training_mode=TRAINING_MODE,
+        sample_generation_steps=SAMPLE_GENERATION_STEPS,
+        sample_generation_max_new_tokens=SAMPLE_GENERATION_MAX_NEW_TOKENS,
+        sample_evaluation_record_count=SAMPLE_EVALUATION_RECORD_COUNT,
         seed=SEED,
     )
     model, processor = load_model_and_processor()

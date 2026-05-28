@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from data_loader.dataset import TrainingExample
 
 
-ChatMessage = dict[str, str]
+ChatMessage = dict[str, Any]
 
 
 def system_prompt_for_example(
@@ -41,6 +43,24 @@ def example_to_messages(
 ) -> list[ChatMessage]:
     """Convert one training example into multi-turn chat messages."""
 
+    src_outputs = example.src_outputs
+    if example.task == "translation":
+        if example.tgt_outputs is None:
+            raise ValueError(f"Translation example {example.uid} has no target outputs")
+        if len(src_outputs) != len(example.tgt_outputs):
+            raise ValueError(
+                f"Translation example {example.uid} has mismatched source/target outputs: "
+                f"src={len(src_outputs)}, tgt={len(example.tgt_outputs)}"
+            )
+        assistant_outputs = [
+            f"{src_output}{tgt_output}"
+            for src_output, tgt_output in zip(src_outputs, example.tgt_outputs)
+        ]
+    elif example.task == "asr":
+        assistant_outputs = list(src_outputs)
+    else:
+        raise ValueError(f"Unsupported training task: {example.task}")
+
     messages: list[ChatMessage] = [
         {
             "role": "system",
@@ -50,26 +70,38 @@ def example_to_messages(
             ),
         }
     ]
-    for block in example.blocks:
-        messages.append({"role": "user", "content": "<|audio|>"})
-        messages.append({"role": "assistant", "content": str(block)})
+    for assistant_output in assistant_outputs:
+        messages.append(
+            {
+                "role": "user",
+                "content": [{"type": "audio"}],
+            }
+        )
+        messages.append(
+            {
+                "role": "assistant",
+                "content": str(assistant_output),
+            }
+        )
     return messages
 
 
 def messages_to_chat_text(tokenizer: object, messages: list[ChatMessage]) -> str:
     """Render chat messages as model-specific training text.
 
-    Prefer the tokenizer chat template.  A small plain-text fallback is retained
-    so formatting tests and dry runs can use minimal tokenizer stubs.
+    Multimodal processors own audio/image packing, but chat templates live on
+    the tokenizer boundary for the target model family.  The caller must pass
+    the explicit tokenizer object, not the processor wrapper.
     """
 
-    apply_chat_template = getattr(tokenizer, "apply_chat_template", None)
-    if callable(apply_chat_template):
-        return str(
-            apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
+    try:
+        rendered = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False,
         )
-    return "\n".join(f"{message['role']}\n{message['content']}" for message in messages)
+    except AttributeError as exc:
+        raise ValueError("Real-audio training requires tokenizer.apply_chat_template")
+    except TypeError:
+        raise
+    return str(rendered)

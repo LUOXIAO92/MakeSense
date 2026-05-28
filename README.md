@@ -22,8 +22,10 @@ In this project:
 ## Requirement
 ### Python packages
 ```bash
-pip install stanza jieba nagisa qwen-asr transformers peft torch torchvision torchaudio unsloth
+pip install stanza jieba nagisa qwen-asr
+pip install transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard --force-reinstall
 ```
+- `qwen-asr` will install outdated `transformers` package
 
 ### Sub module dependence
 - Word aligner: [TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
@@ -55,21 +57,83 @@ Before running, check the top-level configuration block in **each example script
 Available now:
 - dataset builder pipeline, through final pipeline-9 JSONL export;
 - training example construction from the final dataset via `src/data_loader`;
-- thin LoRA SFT training entry via `examples/train_lora.py` and `src/train`, currently scoped as text-only dry-run where `<|audio|>` is a text placeholder;
+- initial real-audio LoRA trainer implementation via `examples/train_lora.py` and `src/train`;
 
 TODO:
-- [ ] **High priority:** test the thin LoRA trainer path with `examples/train_lora.py` on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly. <- Currently unsloth does not support qwen2.5/3-omni series (reason: AutoModelForCausalLM does not support Qwen2_5OmniForConditionalGeneration, as well as thinker). I'm planning to switch to transformers trainer (SFTtrainer still does not support audio input currently).
-- [ ] **High priority:** run LoRA training for `Qwen/Qwen2.5-Omni-3B` after the trainer sanity check passes.
+- [x] High priority: test the thin LoRA trainer path with examples/train_lora.py on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly.
+- [ ] Complete full LoRA training with `google/gemma-4-E2B-it`.
 - [ ] **Second-highest priority:** add an inference backend for running the trained streaming model.
 - [ ] Add hot words and hot translations support for training and inference contexts.
 
+Small-scale validation result (`google/gemma-4-E2B-it`, `train_examples: 96`):
+- tolerance window size: 1.0 s
+- system prompt: Translate to Japanese, tolerance window size is 1
+- Following is small scale test, left is ground truth, right is model output. I have disabled the thinking, but thinking content still occurs. An in-depth check is needed.
+```text
+1. <src><|wait|></src><tgt><|wait|></tgt>  -  「そして」
+2. <src>그리고 아 그리고 </src><tgt>それと、あ、</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+user
+thought
+Thinking Process:
+
+1.  **Analyze the Request:** The user has provided a series of input prompts (in this case, "그리고 우리" and "그리고 우리" repeated) and expects a Japanese translation. The user also specified a constraint: "tolerance window size is 1".
+
+2.  **Analyze the Input (Source Text):** The input is "그리고 우리" (and we/us). This is a very short, somewhat vague phrase.
+
+3.  **Analyze the Constraint (Tolerance Window Size is 1):** This is a machine translation task. The constraint means that the generated translation should be very close to the expected meaning, and the input translation should be very close to the provided input (or in this case, the target translation should be the most natural equivalent).
+
+4.  **Determine the Meaning of "그리고 우리":**
+    *   "그리고" (그리고) means "and".
+    *   "우리" (우리) means "we" or "us" (inclusive of the speaker and listener).
+    *   The combination is "And we/us".
+
+5.
+3. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>그리고 우리 ... </src><tgt>そして、私たちは...</tgt>
+4. <src>우리 가 뉴욕 에 </src><tgt>私たちはニューヨークに</tgt>  -  <src>그리고 우리가 살고 있으니까 </src><tgt>私たちは住んでいるので、</tgt>
+5. <src>살고 있으니까 좀 </src><tgt><|wait|></tgt>  -  <src>살고 있으니까 뉴욕과 뉴저지는 </src><tgt>住んでいるので、ニューヨークとニュージャージーは</tgt>
+6. <src>뉴욕 과 뉴저지 지역 의 </src><tgt>住んでいるので、ニューヨークやニュージャージーの</tgt>  -  <src>유명한 뉴요커 </src><tgt><|wait|></tgt>
+7. <src>유명 한 곳을 소개 해드릴 </src><tgt><|wait|></tgt>  -  <src>유명한 곳들 </src><tgt>有名な場所たち</tgt>
+8. <src>수도 있어요. 그렇 죠, 그렇 죠. </src><tgt>有名な場所をご紹介することもできます。そうですね、その通りです。</tgt>  -  <src>유명한 곳을 소개 해드릴 수 있습니다.</src><tgt><|wait|></tgt>
+9. <src>직접 </src><tgt><|wait|></tgt>  -  <src>네. 현장에 </src><tgt><|wait|></tgt>
+10. <src>그 현장 에 가서 </src><tgt>実際にその現場へ行って、</tgt>  -  <src>직접 </src><tgt><|wait|></tgt>
+11. <src>저희 들이 이제 </src><tgt><|wait|></tgt>  -  <src>체험해 보세요. </src><tgt>体験してみてください。</tgt>
+12. <src>체험 도 해보고 </src><tgt>私たちが体験した様子を</tgt>  -  <src>시험해 드릴게요. </src><tgt>体験して差し上げましょう。</tgt>
+13. <src>소개 도 해드리고 </src><tgt><|wait|></tgt>  -  <src>보고 싶어요. </src><tgt>見てみたいです。</tgt>
+14. <src>그런 프로그램 도 </src><tgt>お届けするような番組も</tgt>  -  <src>프로그램도 만들게요. </src><tgt>プログラムも作ります。</tgt>
+15. <src>만들 기획 이고요. </src><tgt><|wait|></tgt>  -  <src>만들게요. 어떠세요? </src><tgt>作りますよ。いかがですか？</tgt>
+16. <src><|wait|></src><tgt>企画しています。では、</tgt>  -  <src>네. 맞습니다. </src><tgt>はい。その通りです。</tgt>
+17. <src>뉴욕 미니 스에 대한 </src><tgt><|wait|></tgt>  -  <src>뉴욕 미니 </src><tgt>ニューヨークについて説明します。</tgt>
+18. <src>설명 을 좀 해주시죠. </src><tgt>ニューヨーク・ミニについて少し説明していただけますか。</tgt>  -  <src>설명을 해주시죠. </src><tgt>ミニ番組について説明してください。</tgt>
+```
+
 ### LoRA training entry
 
-The LoRA training entry is:
+The default LoRA training example targets `google/gemma-4-E2B-it` with a Transformers multimodal model, PEFT LoRA, real audio chunks, TensorBoard logging, and JSONL metric output.
+
+Configure dataset, model, LoRA, and monitoring options at the top of:
+
+```text
+examples/train_lora.py
+```
+
+Run training with:
 
 ```bash
 PYTHONPATH=src python examples/train_lora.py
 ```
+
+Training writes the LoRA adapter and monitoring files under the configured `OUTPUT_DIR`:
+
+```text
+outputs/makesense_lora/
+  adapter_config.json
+  adapter_model.safetensors
+  runs/
+  train_metrics.jsonl
+  sample_generations.jsonl
+```
+
+Sample generation uses strict streaming evaluation: each assistant turn is generated with only the audio chunks available up to that turn. The number of evaluated records is controlled by `SAMPLE_EVALUATION_RECORD_COUNT` in `examples/train_lora.py`.
 
 ### Pipeline order
 

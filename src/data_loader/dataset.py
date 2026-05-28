@@ -33,7 +33,7 @@ class LoadedTranslation:
 
 @dataclass(frozen=True)
 class TrainingExample:
-    """One LLM training example with training-ready conversation blocks."""
+    """One LLM training example with causal streaming release arrays."""
 
     task: TaskName
     uid: str
@@ -45,7 +45,24 @@ class TrainingExample:
     # emission when ready, and the resulting real wait budget can be 0 or larger
     # depending on the source/target mapping evidence.
     tolerance_window: int
-    blocks: list[str]
+    audio_path: str
+    src_outputs: list[str]
+    tgt_outputs: list[str] | None = None
+
+    @property
+    def blocks(self) -> list[str]:
+        """Backward-compatible combined assistant blocks."""
+
+        if self.task == "asr":
+            return list(self.src_outputs)
+        if self.tgt_outputs is None:
+            raise ValueError(f"Translation example {self.uid} has no target outputs")
+        if len(self.src_outputs) != len(self.tgt_outputs):
+            raise ValueError(
+                f"Translation example {self.uid} has mismatched source/target outputs: "
+                f"src={len(self.src_outputs)}, tgt={len(self.tgt_outputs)}"
+            )
+        return _combine_translation_blocks(self.src_outputs, self.tgt_outputs)
 
 
 @dataclass(frozen=True)
@@ -65,6 +82,7 @@ class _BaseTrainingRecord:
     source_language: str
     target_language: str
     tolerance_window: int
+    audio_path: str
     asr_blocks: list[str]
     translation_blocks: list[str]
 
@@ -90,6 +108,31 @@ def _metadata_from_transcription(source_language: str, transcription: Transcript
         sample_rate=0.0,
         language=source_language,
     )
+
+
+def load_metadata(dataset_root: str | Path) -> dict[tuple[str, str], MetaData]:
+    """Load original metadata rows keyed by ``(source_language, uid)``."""
+
+    root = Path(dataset_root)
+    loaded: dict[tuple[str, str], MetaData] = {}
+    metadata_root = root / "metadata"
+    if not metadata_root.exists():
+        return loaded
+    for jsonl_path in sorted(metadata_root.glob("*/*.jsonl")):
+        source_language = jsonl_path.parent.name
+        for item in _read_jsonl(jsonl_path):
+            metadata = MetaData.model_validate(item)
+            key = (source_language, metadata.uid)
+            if key in loaded:
+                raise ValueError(f"Duplicate metadata row for source_language={source_language}, uid={metadata.uid}")
+            loaded[key] = metadata
+    return loaded
+
+
+def _audio_path_from_metadata(dataset_root: str | Path, source_language: str, metadata: MetaData) -> str:
+    if not metadata.file_name:
+        raise ValueError(f"Cannot resolve audio path for {metadata.uid}: metadata.file_name is empty")
+    return str(Path(dataset_root) / "audio" / source_language / metadata.file_name)
 
 
 def _target_language_from_translation_path(path: Path, source_language: str) -> str:
@@ -242,10 +285,18 @@ def _build_base_training_records(
     tolerance_window: int | None = None,
     seed: int = 4021,
 ) -> list[_BaseTrainingRecord]:
-    """Build translation-capable base records from final dataset files."""
+    """Build translation-capable base records from final dataset files.
+
+    Final dataset rows currently store canonical transcription/translation schema,
+    not materialized training ``src_outputs`` / ``tgt_outputs`` arrays.  Therefore
+    this function performs the narrow final-schema -> training-release-array
+    conversion at the data-loader boundary.  Trainer code must consume the
+    resulting arrays and must not rebuild release logic.
+    """
 
     rng = random.Random(seed)
     transcriptions = load_transcriptions(dataset_root)
+    metadata_by_key = load_metadata(dataset_root)
     base_records: list[_BaseTrainingRecord] = []
     configured_tolerance_window = tolerance_window
 
@@ -257,7 +308,11 @@ def _build_base_training_records(
                 f"source_language={loaded_translation.source_language}, uid={loaded_translation.translation.uid}"
             )
         transcription = transcriptions[key]
-        metadata = _metadata_from_transcription(loaded_translation.source_language, transcription)
+        original_metadata = metadata_by_key.get(key)
+        metadata = original_metadata or _metadata_from_transcription(loaded_translation.source_language, transcription)
+        audio_path = _audio_path_from_metadata(dataset_root, loaded_translation.source_language, metadata) if original_metadata else str(
+            Path(dataset_root) / "audio" / loaded_translation.source_language / f"{transcription.uid}.wav"
+        )
         requested_tolerance_window = _sample_tolerance(
             rng,
             max_empty_window=loaded_translation.translation.max_empty_window,
@@ -285,6 +340,7 @@ def _build_base_training_records(
                 source_language=_language_name(loaded_translation.source_language),
                 target_language=_language_name(loaded_translation.target_language),
                 tolerance_window=real_tolerance_window,
+                audio_path=audio_path,
                 asr_blocks=build_asr_blocks(metadata, transcription),
                 translation_blocks=translation_blocks,
             )
@@ -301,7 +357,9 @@ def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: Tas
             source_language=base_record.source_language,
             target_language=None,
             tolerance_window=base_record.tolerance_window,
-            blocks=base_record.asr_blocks,
+            audio_path=base_record.audio_path,
+            src_outputs=base_record.asr_blocks,
+            tgt_outputs=None,
         )
     return TrainingExample(
         task="translation",
@@ -309,7 +367,9 @@ def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: Tas
         source_language=base_record.source_language,
         target_language=base_record.target_language,
         tolerance_window=base_record.tolerance_window,
-        blocks=_combine_translation_blocks(base_record.asr_blocks, base_record.translation_blocks),
+        audio_path=base_record.audio_path,
+        src_outputs=base_record.asr_blocks,
+        tgt_outputs=base_record.translation_blocks,
     )
 
 

@@ -1,132 +1,185 @@
 # MakeSense: Sense Aware Simultaneous Speech Translation
 
-MakeSense は、同時音声翻訳モデルのために、意味単位を意識した学習データと検証フローを構築する研究・データ生成向けプロジェクトです。ASR / 音声書き起こしにも対応します。
+MakeSense は、同時音声翻訳モデル向けに sense-aware な学習データと検証パイプラインを作るための研究・データ生成プロジェクトです。ASR / 書き起こしタスクにも対応します。
 
-本プロジェクトの目的は、音声翻訳を増分的なマルチターン対話タスクとして扱えるようにすることです。音声は一定の区間ごとに入力され、モデルはその時点で、原文の書き起こしを出力すべきか、訳文を出力すべきか、あるいはまだ情報が足りないため待つべきかを学習します。
+音声翻訳を、逐次的なマルチターン対話タスクとして扱うことを目指しています。音声がチャンクごとに届き、モデルはその時点で原文の書き起こしを出すか、訳文を出すか、あるいは追加の文脈を待つかを学習します。
 
-現時点では、このリポジトリは主にデータセット構築 pipeline と学習データ生成ツールを提供しています。ホットワード / 推奨訳語への対応や推論バックエンドは、今後の開発項目です。
+現在のリポジトリでは、データセット構築 pipeline と学習データ生成ユーティリティを提供しています。ホットワード / 指定訳語のサポートと推論バックエンドは今後の作業です。
 
 ## プロジェクト概要
 
-目的: ストリーミング同時音声翻訳の能力を持ち、さらに ASR / 音声書き起こしにも対応できる、オムニモーダル / マルチモーダルモデルを学習すること。
+目標：ASR / 書き起こし能力も備えた、ストリーミング同時音声翻訳向けの omni / multimodal model を学習すること。
 
-本プロジェクトは、以下の研究から着想を得ています。
+本プロジェクトは以下の論文から着想を得ています。
+- 無限入力ウィンドウ / time-pressure 同時翻訳：[InfiniSST: Simultaneous Translation of Unbounded Speech with Large Language Model](https://arxiv.org/pdf/2503.02969)
+- sense-unit translation：[SIMULSENSE: SENSE-DRIVEN INTERPRETING FOR EFFICIENT SIMULTANEOUS SPEECH TRANSLATION](https://arxiv.org/abs/2509.21932)
 
-* 無限長入力 window / time-pressure に基づく同時翻訳: [InfiniSST: Simultaneous Translation of Unbounded Speech with Large Language Model](https://arxiv.org/pdf/2503.02969)
-* sense-unit translation: [SIMULSENSE: SENSE-DRIVEN INTERPRETING FOR EFFICIENT SIMULTANEOUS SPEECH TRANSLATION](https://arxiv.org/abs/2509.21932)
+本プロジェクトでは：
+- sense-unit detector、audio encoder、LLM backbone alignment をゼロから学習することは**しません**。
+- モデルアーキテクチャは**変更しません**。無限時間のストリーミング翻訳は、実行時のスライディングウィンドウ型コンテキスト管理で扱います。
+- ground-truth 形式に近いデータセットと pipeline 検証用の surface を作り、omni model が同時翻訳の戦略を学習できるようにします。
 
-本プロジェクトでは、次の方針を取ります。
-
-* 意味単位検出器、音声エンコーダ、LLM backbone のアラインメントモジュールをゼロから学習することはしません。
-* モデルアーキテクチャは変更しません。無限長のストリーミング翻訳は、実行時のスライディングウィンドウ型コンテキスト管理によって扱います。
-* 一方で、ground truth に近い形式のデータセットを構築し、pipeline の検証に使えるインターフェースと中間結果を提供します。これにより、オムニモーダルモデルが同時翻訳の出力方針を学習できるようにします。
-
-## 環境要件
-
-### Python 依存パッケージ
-
+## 要件
+### Python packages
 ```bash
-pip install stanza jieba nagisa qwen-asr transformers peft torch torchvision torchaudio unsloth
+pip install stanza jieba nagisa qwen-asr
+pip install transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard --force-reinstall
 ```
+- `qwen-asr` は古い `transformers` をインストールします。
 
 ### サブモジュール依存
-
-* 単語アラインメントツール: [TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
-* デフォルトのベースモデルには [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE) を使用します。
+- 単語アライナー：[TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
+- デフォルトのベースモデルには [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE) を使います。
 
 ## Pipeline
 
 ### 原言語 / 書き起こし側
-
-1. metadata に基づいて cache records を初期化する
-2. 必要に応じて ASR による書き起こしを行う
-3. forced alignment を実行する
-4. time pressure に基づいて、原言語の意味単位を分割する
+1. metadata から cache records を初期化
+2. 必要に応じて ASR 書き起こし
+3. forced alignment
+4. time-pressure 原言語 sense-unit segmentation
 
 ### 目標言語 / 翻訳側
+1. raw translation
+2. translation reconstruction
+3. pure-text target sense-unit segmentation
+4. target-centric source mapping
+5. final dataset collection/export
 
-1. 初期翻訳を生成する
-2. 翻訳を再構成する
-3. 目標言語のプレーンテキストを意味単位に分割する
-4. 目標言語を基準として、対応する原言語部分をマッピングする
-5. 最終データセットを収集してエクスポートする
+## 使い方：データセット pipeline 全体を実行する
 
-## 使い方: データセット pipeline 全体を実行する
+現在のワークフローは `examples/` 配下のステージスクリプトで実行します。各ステージは前段の cache を読み込み、新しいステージ cache を書き出します。既存の JSONL cache から再開することもできます。
 
-現在のワークフローは、`examples/` ディレクトリ内の各ステージ用スクリプトによって実行されます。各ステージは前段階の cache を読み込み、新しいステージの cache を書き出します。また、既存の JSONL cache の状態から処理を再開することもできます。
+実行前に、**各 example スクリプト冒頭の設定ブロック**を確認してください。よく使う項目は dataset/cache roots、model names、target languages、`ENABLE_THINKING`、`TOP_P`、`TOP_K`、必要に応じて `ENABLE_VISUALIZATION` です。
 
-実行前に、必ず**各 example スクリプト冒頭の設定ブロック**を確認してください。よく使う設定項目には、データセット / cache のルートディレクトリ、モデル名、目標言語、`ENABLE_THINKING`、`TOP_P`、`TOP_K`、また必要に応じて `ENABLE_VISUALIZATION` などがあります。
+### 現在使えるもの
 
-### 現在利用可能な機能
+利用可能：
+- 最終 pipeline-9 JSONL export まで実行できるデータセット構築 pipeline。
+- `src/data_loader` による、最終データセットからの学習サンプル構築。
+- `examples/train_lora.py` と `src/train` による初版 real-audio LoRA trainer。
 
-現時点で利用できる機能は以下のとおりです。
+TODO：
+- [x] 高優先度：小さなサンプルで `examples/train_lora.py` の thin LoRA trainer path をテストし、conversation rendering、assistant-only loss 設定、1〜2 training steps が正しく動くことを確認する。
+- [ ] `google/gemma-4-E2B-it` で full LoRA training を完了する。
+- [ ] **次に高い優先度：** 学習済み streaming model を実行するための inference backend を追加する。
+- [ ] training / inference context 向けに hot words と hot translations のサポートを追加する。
 
-* 最終的な pipeline-9 JSONL エクスポートまで実行可能なデータセット構築 pipeline
-* `src/data_loader` による、最終データセットからの学習サンプル構築
-* `examples/train_lora.py` と `src/train` による軽量 LoRA SFT 学習エントリーポイント
-  ただし、現時点ではテキスト dry-run のみを対象としており、`<|audio|>` はテキスト上のプレースホルダーとして扱われます。
+小規模検証結果（`google/gemma-4-E2B-it`, `train_examples: 96`）：
+- tolerance window size: 1.0 s
+- system prompt: Translate to Japanese, tolerance window size is 1
+- 以下は小規模テストの結果です。左が ground truth、右が model output です。thinking は無効化済みですが、出力に thinking content がまだ混入しているため、追加調査が必要です。
+```text
+1. <src><|wait|></src><tgt><|wait|></tgt>  -  「そして」
+2. <src>그리고 아 그리고 </src><tgt>それと、あ、</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+user
+thought
+Thinking Process:
 
-今後の TODO:
+1.  **Analyze the Request:** The user has provided a series of input prompts (in this case, "그리고 우리" and "그리고 우리" repeated) and expects a Japanese translation. The user also specified a constraint: "tolerance window size is 1".
 
-* [ ] **高優先度:** ごく小規模なサンプルで `examples/train_lora.py` の軽量 LoRA 学習フローをテストし、conversation のレンダリング、assistant-only loss の設定、1〜2 step の学習が正常に動作することを確認する。 <- trainer を unsloth からより一般的な transformers `trainer` に移行する予定 (trainsformers の `AutoModelForCausalLM` と `Qwen2_5OmniForConditionalGeneration` が非互換のため)
-* [ ] **高優先度:** 学習器の sanity check が完了した後、`Qwen/Qwen2.5-Omni-3B` に対して LoRA 学習を実行する。
-* [ ] **中優先度:** 学習済みストリーミングモデルを実行するための推論バックエンドを追加する。
-* [ ] 学習および推論コンテキストに、ホットワードと推奨訳語のサポートを追加する。
+2.  **Analyze the Input (Source Text):** The input is "그리고 우리" (and we/us). This is a very short, somewhat vague phrase.
 
-### LoRA 学習エントリーポイント
+3.  **Analyze the Constraint (Tolerance Window Size is 1):** This is a machine translation task. The constraint means that the generated translation should be very close to the expected meaning, and the input translation should be very close to the provided input (or in this case, the target translation should be the most natural equivalent).
 
-LoRA 学習は、以下のコマンドから実行できます。
+4.  **Determine the Meaning of "그리고 우리":**
+    *   "그리고" (그리고) means "and".
+    *   "우리" (우리) means "we" or "us" (inclusive of the speaker and listener).
+    *   The combination is "And we/us".
+
+5.
+3. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>그리고 우리 ... </src><tgt>そして、私たちは...</tgt>
+4. <src>우리 가 뉴욕 에 </src><tgt>私たちはニューヨークに</tgt>  -  <src>그리고 우리가 살고 있으니까 </src><tgt>私たちは住んでいるので、</tgt>
+5. <src>살고 있으니까 좀 </src><tgt><|wait|></tgt>  -  <src>살고 있으니까 뉴욕과 뉴저지는 </src><tgt>住んでいるので、ニューヨークとニュージャージーは</tgt>
+6. <src>뉴욕 과 뉴저지 지역 의 </src><tgt>住んでいるので、ニューヨークやニュージャージーの</tgt>  -  <src>유명한 뉴요커 </src><tgt><|wait|></tgt>
+7. <src>유명 한 곳을 소개 해드릴 </src><tgt><|wait|></tgt>  -  <src>유명한 곳들 </src><tgt>有名な場所たち</tgt>
+8. <src>수도 있어요. 그렇 죠, 그렇 죠. </src><tgt>有名な場所をご紹介することもできます。そうですね、その通りです。</tgt>  -  <src>유명한 곳을 소개 해드릴 수 있습니다.</src><tgt><|wait|></tgt>
+9. <src>직접 </src><tgt><|wait|></tgt>  -  <src>네. 현장에 </src><tgt><|wait|></tgt>
+10. <src>그 현장 에 가서 </src><tgt>実際にその現場へ行って、</tgt>  -  <src>직접 </src><tgt><|wait|></tgt>
+11. <src>저희 들이 이제 </src><tgt><|wait|></tgt>  -  <src>체험해 보세요. </src><tgt>体験してみてください。</tgt>
+12. <src>체험 도 해보고 </src><tgt>私たちが体験した様子を</tgt>  -  <src>시험해 드릴게요. </src><tgt>体験して差し上げましょう。</tgt>
+13. <src>소개 도 해드리고 </src><tgt><|wait|></tgt>  -  <src>보고 싶어요. </src><tgt>見てみたいです。</tgt>
+14. <src>그런 프로그램 도 </src><tgt>お届けするような番組も</tgt>  -  <src>프로그램도 만들게요. </src><tgt>プログラムも作ります。</tgt>
+15. <src>만들 기획 이고요. </src><tgt><|wait|></tgt>  -  <src>만들게요. 어떠세요? </src><tgt>作りますよ。いかがですか？</tgt>
+16. <src><|wait|></src><tgt>企画しています。では、</tgt>  -  <src>네. 맞습니다. </src><tgt>はい。その通りです。</tgt>
+17. <src>뉴욕 미니 스에 대한 </src><tgt><|wait|></tgt>  -  <src>뉴욕 미니 </src><tgt>ニューヨークについて説明します。</tgt>
+18. <src>설명 을 좀 해주시죠. </src><tgt>ニューヨーク・ミニについて少し説明していただけますか。</tgt>  -  <src>설명을 해주시죠. </src><tgt>ミニ番組について説明してください。</tgt>
+```
+
+### LoRA training entry
+
+デフォルトの LoRA 学習例は `google/gemma-4-E2B-it` を対象にし、Transformers multimodal model、PEFT LoRA、実音声 chunks、TensorBoard logging、JSONL metrics を使います。
+
+dataset、model、LoRA、monitoring の設定は次のファイル冒頭で行います。
+
+```text
+examples/train_lora.py
+```
+
+学習を実行します。
 
 ```bash
 PYTHONPATH=src python examples/train_lora.py
 ```
 
+学習結果の LoRA adapter と monitoring ファイルは、設定した `OUTPUT_DIR` に書き込まれます。
+
+```text
+outputs/makesense_lora/
+  adapter_config.json
+  adapter_model.safetensors
+  runs/
+  train_metrics.jsonl
+  sample_generations.jsonl
+```
+
+Sample generation では strict streaming evaluation を使います。各 assistant turn では、その時点までに見えている audio chunks だけを使います。評価するレコード数は `examples/train_lora.py` の `SAMPLE_EVALUATION_RECORD_COUNT` で制御します。
+
 ### Pipeline の実行順序
 
-各ステージは、以下の順序で実行してください。
+各ステージは次の順序で実行します。
 
 ```bash
 export PYTHONPATH=src 
 
-# 1. 必要に応じて、データセットの元データをダウンロード / 準備する。
-#    ここでは Emilia データセットを使用する。詳細は https://huggingface.co/datasets/amphion/Emilia-Dataset を参照。
+# 1. 必要に応じて、データセットの元データをダウンロード / 準備します。（ここでは Emilia dataset を使います。https://huggingface.co/datasets/amphion/Emilia-Dataset を参照してください）
 python examples/pipeline_1_download_Emilia.py
 
-# 2. データセット metadata に基づいて PipelineRecord cache shards を初期化する。
+# 2. dataset metadata から PipelineRecord cache shards を初期化します。
 python examples/pipeline_2_initialize_cache.py
 
-# 3a. 任意: omni ASR + translation 経路。
-#     ワンショットのマルチモーダル翻訳動作を検証したい場合に使用する。
+# 3a. 任意の omni ASR + translation 経路。
+# one-pass multimodal translation の挙動を確認するときに使います。
 python examples/pipeline_3_a_asr_translation_omni.py
 
-# 3b-1. ASR のみを実行する経路。
-#       このステップでは、cache に原言語の書き起こし結果を書き込む。
+# 3b-1. ASR-only path。
+# source transcript artifacts を cache に書き込みます。
 python examples/pipeline_3_b1_asr.py
 
-# 3b-2. ASR cache に基づいて初期翻訳を生成する。
-#       デフォルトはテキストのみのモード。音声補助モードはスクリプト内の設定で切り替える。
+# 3b-2. ASR cache から raw translation を生成します。
+# デフォルトは text-only です。audio-assisted mode はスクリプト内で制御し、audio 対応 omni model が必要です。
 python examples/pipeline_3_b2_asr_text_translation.py
 
-# 4. 原言語の書き起こし結果に対して forced alignment を実行する。
+# 4. source transcription の forced alignment。
 python examples/pipeline_4_forced_alignment.py
 
-# 5. time pressure に基づいて原言語の意味単位を分割する。
+# 5. time-pressure source sense-unit segmentation。
 python examples/pipeline_5_asr_segmentation.py
 
-# 6. 翻訳を再構成する。
+# 6. translation reconstruction。
 python examples/pipeline_6_translation_reconstruction.py
 
-# 7. 目標言語のプレーンテキストを意味単位に分割する。
+# 7. pure-text target sense-unit segmentation。
 python examples/pipeline_7_pure_text_segmentation.py
 
-# 8. 目標言語の意味単位を、原言語 token ids にマッピングする。
+# 8. target sense units から source token ids への target-centric mapping。
 python examples/pipeline_8_target_centric_mapping.py
 
-# 9. 完了済みの pipeline-8 cache 状態から、最終データセットを収集してエクスポートする。
+# 9. 完了済み pipeline-8 cache state から最終データセットを収集 / export します。
 python examples/pipeline_9_collect_dataset.py
 ```
 
-推奨される実行順序は以下です。
+推奨順序：
 
 ```bash
 python examples/pipeline_2_initialize_cache.py
@@ -140,9 +193,9 @@ python examples/pipeline_8_target_centric_mapping.py
 python examples/pipeline_9_collect_dataset.py
 ```
 
-### 最終データセットの出力
+### 最終データセット出力
 
-Pipeline 9 では、最終データセットが以下のようなディレクトリ構成でエクスポートされます。
+Pipeline 9 は次の構成で最終データセットを export します。
 
 ```text
 path/to/output/dir/
@@ -160,15 +213,15 @@ path/to/output/dir/
 
 ## 出力形式
 
-### ストリーミングモデルの出力
+### Streaming model output
 
 ```text
-<src>(書き起こしテキスト)</src><tgt>(目標言語の翻訳テキスト)</tgt>
+<src>(transcription text)</src><tgt>(target translation text)</tgt>
 ```
 
-原言語の書き起こし、または目標言語の翻訳を安定して生成するには情報がまだ足りない場合、モデルは `<|wait|>` を出力できます。
+原言語の書き起こしや目標言語の翻訳を安定して出すには情報が足りない場合、モデルは `<|wait|>` を出力できます。
 
-### Conversation 形式
+### Conversation format
 
 ```text
 system
@@ -177,10 +230,10 @@ system
 user
 <|audio|>
 assistant
-<src>(書き起こしテキスト、または <|wait|>)</src><tgt>(目標言語の翻訳テキスト、または <|wait|>)</tgt>
+<src>(transcription text or <|wait|>)</src><tgt>(target translation text or <|wait|>)</tgt>
 user
 <|audio|>
 assistant
-<src>(次の区間の書き起こしテキスト、または <|wait|>)</src><tgt>(次の区間の目標言語翻訳、または <|wait|>)</tgt>
+<src>(next transcription text or <|wait|>)</src><tgt>(next target translation text or <|wait|>)</tgt>
 ...
 ```
