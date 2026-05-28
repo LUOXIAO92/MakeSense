@@ -68,7 +68,7 @@ pip install stanza jieba nagisa qwen-asr transformers peft torch torchvision tor
 
 今後の TODO:
 
-* [ ] **高優先度:** ごく小規模なサンプルで `examples/train_lora.py` の軽量 LoRA 学習フローをテストし、conversation のレンダリング、assistant-only loss の設定、1〜2 step の学習が正常に動作することを確認する。
+* [ ] **高優先度:** ごく小規模なサンプルで `examples/train_lora.py` の軽量 LoRA 学習フローをテストし、conversation のレンダリング、assistant-only loss の設定、1〜2 step の学習が正常に動作することを確認する。 <- trainer を unsloth からより一般的な transformers `trainer` に移行する予定 (trainsformers の `AutoModelForCausalLM` と `Qwen2_5OmniForConditionalGeneration` が非互換のため)
 * [ ] **高優先度:** 学習器の sanity check が完了した後、`Qwen/Qwen2.5-Omni-3B` に対して LoRA 学習を実行する。
 * [ ] **中優先度:** 学習済みストリーミングモデルを実行するための推論バックエンドを追加する。
 * [ ] 学習および推論コンテキストに、ホットワードと推奨訳語のサポートを追加する。
