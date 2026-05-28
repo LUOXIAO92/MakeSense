@@ -58,7 +58,7 @@ Available now:
 - thin LoRA SFT training entry via `examples/train_lora.py` and `src/train`, currently scoped as text-only dry-run where `<|audio|>` is a text placeholder;
 
 TODO:
-- [ ] **High priority:** test the thin LoRA trainer path with `examples/train_lora.py` on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly.
+- [ ] **High priority:** test the thin LoRA trainer path with `examples/train_lora.py` on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly. <- Currently unsloth does not support qwen2.5/3-omni series (reason: AutoModelForCausalLM does not support Qwen2_5OmniForConditionalGeneration, as well as thinker). I'm planning to switch to transformers trainer (SFTtrainer still does not support audio input currently).
 - [ ] **High priority:** run LoRA training for `Qwen/Qwen2.5-Omni-3B` after the trainer sanity check passes.
 - [ ] **Second-highest priority:** add an inference backend for running the trained streaming model.
 - [ ] Add hot words and hot translations support for training and inference contexts.
