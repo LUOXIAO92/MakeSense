@@ -58,7 +58,7 @@ pip install stanza jieba nagisa qwen-asr transformers peft torch torchvision tor
 - 通过 `examples/train_lora.py` 和 `src/train` 提供轻量级 LoRA SFT 训练入口；目前它只覆盖文本 dry-run 场景，其中 `<|audio|>` 只是一个文本占位符；
 
 待办事项: 
-- [ ] **高优先级:** 在一个极小样本上测试 `examples/train_lora.py` 这条轻量 LoRA 训练路径，并确认 conversation 渲染、assistant-only loss 设置，以及 1-2 个训练 step 都能正常工作。
+- [ ] **高优先级:** 在一个极小样本上测试 `examples/train_lora.py` 这条轻量 LoRA 训练路径，并确认 conversation 渲染、assistant-only loss 设置，以及 1-2 个训练 step 都能正常工作。 <- 由于unsloth的兼容问题，计划转为使用 transformers `trainer` (transformers 的 `AutoModelForCausalLM` 不支持直接加载 qwen2.5/3-omni 系列的模型，必须要通过 `Qwen2_5OmniForConditionalGeneration`)。 目前 `SFTtrainer` 似乎也不支持音频输入
 - [ ] **高优先级:** 训练器完成 sanity check 后，对 `Qwen/Qwen2.5-Omni-3B` 运行 LoRA 训练。
 - [ ] **次高优先级:** 增加推理后端，用于运行训练好的流式模型。
 - [ ] 为训练和推理上下文加入热词与热门译法支持。
