@@ -86,22 +86,21 @@ def example_to_messages(
     return messages
 
 
-def messages_to_chat_text(tokenizer: object, messages: list[ChatMessage]) -> str:
+def messages_to_chat_text(processor: object, messages: list[ChatMessage]) -> str:
     """Render chat messages as model-specific training text.
 
-    Multimodal processors own audio/image packing, but chat templates live on
-    the tokenizer boundary for the target model family.  The caller must pass
-    the explicit tokenizer object, not the processor wrapper.
+    Multimodal processors own chat-template rendering and audio/image packing.
     """
 
     try:
-        rendered = tokenizer.apply_chat_template(
+        rendered = processor.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=False,
+            enable_thinking=False,
         )
     except AttributeError as exc:
-        raise ValueError("Real-audio training requires tokenizer.apply_chat_template")
+        raise ValueError("Real-audio training requires processor.apply_chat_template")
     except TypeError:
         raise
     return str(rendered)

@@ -3,6 +3,15 @@
 import sys
 sys.path.append("src")
 
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*_check_is_size will be removed in a future PyTorch release.*",
+    category=FutureWarning,
+    module=r"bitsandbytes\.backends\.cuda\.ops",
+)
+
 from pathlib import Path
 
 import torch
@@ -10,6 +19,9 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForMultimodalLM, AutoProcessor, BitsAndBytesConfig
 
 from train import LoraTrainConfig, TrainingDataConfig, train_lora
+from train.continue_utils import prepare_lora_model_for_continue, resolve_continue_plan
+
+
 
 
 # --- Dataset controls ---
@@ -21,13 +33,22 @@ TOLERANCE_WINDOW: int | None = None
 SEED = 4021
 
 
+# --- Output / checkpoint controls ---
+OUTPUT_DIR = Path("outputs") / "makesense_lora1"
+CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
+CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
+SAVE_PROCESSOR = False
+
+
 # --- Model / LoRA controls ---
 MODEL_NAME = "google/gemma-4-E2B-it"
-OUTPUT_DIR = Path("outputs") / "makesense_lora"
 MAX_SEQ_LENGTH = 32000
 LOAD_IN_4BIT = True
 AUDIO_SAMPLING_RATE = 16000
 AUDIO_CHUNK_SECONDS = 1.0
+ASSISTANT_HEADER = "<|turn>model\n"
+ASSISTANT_END = "<turn|>"
+GENERATION_STOP = "<turn|>"
 
 LORA_R = 16
 LORA_ALPHA = 16
@@ -40,26 +61,30 @@ LORA_TARGET_MODULES = (
 
 
 # --- Trainer controls ---
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.0
-NUM_TRAIN_EPOCHS = 1
+ADAM_BETA1 = 0.9
+ADAM_BETA2 = 0.999
+MAX_GRAD_NORM = 1.0
+NUM_TRAIN_EPOCHS = 20
 MAX_STEPS = -1
 PER_DEVICE_TRAIN_BATCH_SIZE = 1
 GRADIENT_ACCUMULATION_STEPS = 8
 WARMUP_STEPS = 5
 LOGGING_STEPS = 1
-EVAL_STEPS = 100
-SAVE_STEPS = 500
-MAX_GRAD_NORM = 1.0
-SAMPLE_GENERATION_STEPS = 12
-SAMPLE_GENERATION_MAX_NEW_TOKENS = 256
-SAMPLE_EVALUATION_RECORD_COUNT = 1
+EVAL_STEPS = 50
+SAVE_STEPS = 50
+TEST_STEPS = 50
+TEST_MAX_NEW_TOKENS = 256
+TEST_RECORD_COUNT = -1
+TEST_OUTPUT_MARKDOWN = True
 
 
-def load_model_and_processor():
-    """Load the target model/processor and attach PEFT LoRA."""
+def load_processor():
+    return AutoProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True, dtype=torch.bfloat16)
 
-    processor = AutoProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True, dtype=torch.bfloat16)
+
+def load_base_model():
     quantization_config = None
     if LOAD_IN_4BIT:
         quantization_config = BitsAndBytesConfig(
@@ -75,7 +100,7 @@ def load_model_and_processor():
                 "model.embed_audio",
             ],
         )
-    model = AutoModelForMultimodalLM.from_pretrained(
+    base_model = AutoModelForMultimodalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.bfloat16,
         device_map="auto",
@@ -83,7 +108,15 @@ def load_model_and_processor():
         trust_remote_code=True,
     )
     if LOAD_IN_4BIT:
-        model = prepare_model_for_kbit_training(model)
+        base_model = prepare_model_for_kbit_training(
+            base_model,
+            use_gradient_checkpointing=True,
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
+    return base_model
+
+
+def attach_fresh_lora(base_model):
     lora_config = LoraConfig(
         r=LORA_R,
         lora_alpha=LORA_ALPHA,
@@ -92,9 +125,9 @@ def load_model_and_processor():
         task_type="CAUSAL_LM",
         target_modules=LORA_TARGET_MODULES,
     )
-    model = get_peft_model(model, lora_config)
+    model = get_peft_model(base_model, lora_config)
     model.print_trainable_parameters()
-    return model, processor
+    return model
 
 
 def main() -> None:
@@ -106,6 +139,11 @@ def main() -> None:
         tolerance_window=TOLERANCE_WINDOW,
         seed=SEED,
     )
+    continue_plan = resolve_continue_plan(
+        continue_type=CONTINUE_TYPE,
+        checkpoint_path=CHECKPOINT_PATH,
+        output_dir=OUTPUT_DIR,
+    )
     train_config = LoraTrainConfig(
         output_dir=OUTPUT_DIR,
         max_seq_length=MAX_SEQ_LENGTH,
@@ -113,6 +151,8 @@ def main() -> None:
         audio_chunk_seconds=AUDIO_CHUNK_SECONDS,
         learning_rate=LEARNING_RATE,
         weight_decay=WEIGHT_DECAY,
+        adam_beta1=ADAM_BETA1,
+        adam_beta2=ADAM_BETA2,
         num_train_epochs=NUM_TRAIN_EPOCHS,
         max_steps=MAX_STEPS,
         per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
@@ -122,12 +162,26 @@ def main() -> None:
         eval_steps=EVAL_STEPS,
         save_steps=SAVE_STEPS,
         max_grad_norm=MAX_GRAD_NORM,
-        sample_generation_steps=SAMPLE_GENERATION_STEPS,
-        sample_generation_max_new_tokens=SAMPLE_GENERATION_MAX_NEW_TOKENS,
-        sample_evaluation_record_count=SAMPLE_EVALUATION_RECORD_COUNT,
+        test_steps=TEST_STEPS,
+        test_max_new_tokens=TEST_MAX_NEW_TOKENS,
+        test_record_count=TEST_RECORD_COUNT,
+        test_output_markdown=TEST_OUTPUT_MARKDOWN,
+        assistant_header=ASSISTANT_HEADER,
+        assistant_end=ASSISTANT_END,
+        generation_stop=GENERATION_STOP,
+        save_processor=SAVE_PROCESSOR,
+        continue_type=CONTINUE_TYPE,
+        checkpoint_path=CHECKPOINT_PATH,
+        continue_plan=continue_plan,
+        model_name=MODEL_NAME,
         seed=SEED,
     )
-    model, processor = load_model_and_processor()
+    processor = load_processor()
+    model = prepare_lora_model_for_continue(
+        continue_plan=continue_plan,
+        base_model_factory=load_base_model,
+        fresh_lora_factory=attach_fresh_lora,
+    )
     train_lora(model=model, processor=processor, data_config=data_config, train_config=train_config)
 
 
