@@ -1,3 +1,5 @@
+[English](README.md) | 简体中文 | [日本語](README_ja.md) | [한국어](README_ko.md)
+
 # MakeSense: Sense Aware Simultaneous Speech Translation
 
 MakeSense 是一个面向研究和数据生成的项目，用来为同步语音翻译模型构建具备语义感知能力的训练数据和验证流程，同时支持 ASR / 转写任务。项目目标是把语音翻译改造成增量式多轮对话任务：音频按片段陆续到达，模型学习何时输出源语言转写、何时输出目标语言翻译，以及何时等待更多上下文。
@@ -241,10 +243,79 @@ Hyper Parmeters
 
 ### Results
 
-- tolerance window size: 1.0 s
-- Following is small scale test, left is ground truth, right is model output. I have disabled the thinking, but thinking content still occurs. An in-depth check is needed.
+#### 指标说明
+
+下面这些 strict streaming test 指标主要用来检查模型在流式对话中的格式控制和释放策略：输出是否符合 `<src>...</src><tgt>...</tgt>` 协议，生成是否在预期的 stop token 处结束，以及每个 assistant turn 中 source / target 两侧是应该等待还是释放内容。它们不直接衡量 ASR 文字是否逐字正确，也不直接衡量翻译语义质量。
+
+**POSTPROCESSED_TURN_STOP_RATE**
+
+- 含义：后处理后的输出是否是干净、完整的协议输出。
+- 计算：`postprocessed_turn_stop_turns / TURN_COUNT`。当一个 turn 的后处理文本协议合法，并且正好等于规范化后的 `<src>...</src><tgt>...</tgt>` 输出时，记为通过。
+
+**PROTOCOL_VALID_RATE**
+
+- 含义：模型输出符合规定协议的比例。
+- 计算：`protocol_valid_turns / TURN_COUNT`。输出必须匹配 `<src>...</src><tgt>...</tgt>`，并且 source / target 内容内部不能再嵌套 `<src>`、`</src>`、`<tgt>`、`</tgt>` 标签。
+
+**RAW_TURN_STOP_RATE**
+
+- 含义：原始 decode 结果是否在配置的 generation stop token 处正常停止。
+- 计算：`raw_turn_stop_turns / TURN_COUNT`。如果 raw output 在 postprocessed output 之后紧接着 `generation_stop`，该 turn 记为正常停止。
+
+**RECORD_COUNT**
+
+- 含义：本次 strict streaming test 实际评估的测试样本数。
+- 计算：`len(records)`。
+
+**SRC_RELEASE_ACCURACY**
+
+- 含义：在标准答案要求 source 侧释放转写文本的 turn 中，模型也选择释放 source 内容的比例。
+- 计算：`src_release_correct / SRC_RELEASE_TOTAL`。这里只判断 `<src>...</src>` 是不是非 wait，不检查释放出来的转写文本是否正确。
+
+**SRC_RELEASE_TOTAL**
+
+- 含义：标准答案中 source 侧应该释放内容的 turn 数。
+- 计算：统计 ground truth 的 `<src>...</src>` 不是 `<|wait|>` 的 turn。
+
+**SRC_WAIT_ACCURACY**
+
+- 含义：在标准答案要求 source 侧等待的 turn 中，模型也输出 source wait 的比例。
+- 计算：`src_wait_correct / SRC_WAIT_TOTAL`。这里只检查模型的 `<src>...</src>` 是否为 `<|wait|>`。
+
+**SRC_WAIT_TOTAL**
+
+- 含义：标准答案中 source 侧应该等待的 turn 数。
+- 计算：统计 ground truth 的 `<src>...</src>` 去掉首尾空白后正好等于 `<|wait|>` 的 turn。
+
+**TGT_RELEASE_ACCURACY**
+
+- 含义：在标准答案要求 target 侧释放翻译的 turn 中，模型也选择释放 target 内容的比例。
+- 计算：`tgt_release_correct / TGT_RELEASE_TOTAL`。这里只判断 `<tgt>...</tgt>` 是不是非 wait，不检查释放出来的翻译是否语义正确。
+
+**TGT_RELEASE_TOTAL**
+
+- 含义：标准答案中 target 侧应该释放翻译的 turn 数。
+- 计算：统计 ground truth 的 `<tgt>...</tgt>` 不是 `<|wait|>` 的 turn。
+
+**TGT_WAIT_ACCURACY**
+
+- 含义：在标准答案要求 target 侧等待的 turn 中，模型也输出 target wait 的比例。
+- 计算：`tgt_wait_correct / TGT_WAIT_TOTAL`。这里只检查模型的 `<tgt>...</tgt>` 是否为 `<|wait|>`。
+
+**TGT_WAIT_TOTAL**
+
+- 含义：标准答案中 target 侧应该等待的 turn 数。
+- 计算：统计 ground truth 的 `<tgt>...</tgt>` 去掉首尾空白后正好等于 `<|wait|>` 的 turn。
+
+**TURN_COUNT**
+
+- 含义：所有被选中测试样本中，实际评估的 assistant turn 总数。
+- 计算：对 `records` 中所有生成并评估过的 assistant 输出求和。
 
 #### Test Outputs - step 50
+
+- tolerance window size: 1.0 s
+- 以下是小规模测试结果，左侧是标准答案，右侧是模型输出。
 
 ```text
 Test Metrics

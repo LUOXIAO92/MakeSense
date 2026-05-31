@@ -1,3 +1,5 @@
+[English](README.md) | [简体中文](README_zh-cn.md) | 日本語 | [한국어](README_ko.md)
+
 # MakeSense: Sense Aware Simultaneous Speech Translation
 
 MakeSense は、同時音声翻訳モデル向けに sense-aware な学習データと検証パイプラインを作るための研究・データ生成プロジェクトです。ASR / 書き起こしタスクにも対応します。
@@ -243,10 +245,79 @@ Hyper Parmeters
 
 ### Results
 
-- tolerance window size: 1.0 s
-- Following is small scale test, left is ground truth, right is model output. I have disabled the thinking, but thinking content still occurs. An in-depth check is needed.
+#### Metrics
+
+ここで示す strict streaming test の指標は、主にストリーミング対話における出力形式とリリース判断を確認するためのものです。具体的には、出力が `<src>...</src><tgt>...</tgt>` のプロトコルに従っているか、生成が想定した stop token で止まっているか、各 assistant turn で source / target 側が待つべきか内容を出すべきかを見ています。ASR の文字単位の正確さや、翻訳の意味的な品質を直接測る指標ではありません。
+
+**POSTPROCESSED_TURN_STOP_RATE**
+
+- 意味：後処理後の出力が、余計な文字列を含まない完全なプロトコル出力になっている割合です。
+- 計算：`postprocessed_turn_stop_turns / TURN_COUNT`。後処理後のテキストがプロトコルとして正しく、正規化された `<src>...</src><tgt>...</tgt>` 出力と一致する turn を成功として数えます。
+
+**PROTOCOL_VALID_RATE**
+
+- 意味：モデル出力が指定されたプロトコルに従っている割合です。
+- 計算：`protocol_valid_turns / TURN_COUNT`。出力は `<src>...</src><tgt>...</tgt>` に一致する必要があり、source / target の中に `<src>`、`</src>`、`<tgt>`、`</tgt>` などのタグが入れ子で含まれていてはいけません。
+
+**RAW_TURN_STOP_RATE**
+
+- 意味：raw decode された生成結果が、設定された generation stop token で正しく止まっている割合です。
+- 計算：`raw_turn_stop_turns / TURN_COUNT`。raw output が postprocessed output の直後に `generation_stop` を続けている場合、その turn は正しく停止したものとして扱います。
+
+**RECORD_COUNT**
+
+- 意味：今回の strict streaming test で実際に評価した test record の数です。
+- 計算：`len(records)`。
+
+**SRC_RELEASE_ACCURACY**
+
+- 意味：ground truth で source 側が転写テキストを出すべき turn のうち、モデルも source 側で内容を出した割合です。
+- 計算：`src_release_correct / SRC_RELEASE_TOTAL`。ここでは `<src>...</src>` が wait ではないかだけを見ており、出力された転写テキストそのものが正しいかは評価しません。
+
+**SRC_RELEASE_TOTAL**
+
+- 意味：ground truth で source 側が内容を出すべき turn の数です。
+- 計算：ground truth の `<src>...</src>` が `<|wait|>` ではない turn を数えます。
+
+**SRC_WAIT_ACCURACY**
+
+- 意味：ground truth で source 側が待つべき turn のうち、モデルも source 側で wait を出した割合です。
+- 計算：`src_wait_correct / SRC_WAIT_TOTAL`。モデルの `<src>...</src>` が `<|wait|>` かどうかだけを見ます。
+
+**SRC_WAIT_TOTAL**
+
+- 意味：ground truth で source 側が待つべき turn の数です。
+- 計算：ground truth の `<src>...</src>` が、前後の空白を除いたうえで `<|wait|>` と完全に一致する turn を数えます。
+
+**TGT_RELEASE_ACCURACY**
+
+- 意味：ground truth で target 側が翻訳を出すべき turn のうち、モデルも target 側で内容を出した割合です。
+- 計算：`tgt_release_correct / TGT_RELEASE_TOTAL`。ここでは `<tgt>...</tgt>` が wait ではないかだけを見ており、出力された翻訳の意味的な正しさは評価しません。
+
+**TGT_RELEASE_TOTAL**
+
+- 意味：ground truth で target 側が翻訳を出すべき turn の数です。
+- 計算：ground truth の `<tgt>...</tgt>` が `<|wait|>` ではない turn を数えます。
+
+**TGT_WAIT_ACCURACY**
+
+- 意味：ground truth で target 側が待つべき turn のうち、モデルも target 側で wait を出した割合です。
+- 計算：`tgt_wait_correct / TGT_WAIT_TOTAL`。モデルの `<tgt>...</tgt>` が `<|wait|>` かどうかだけを見ます。
+
+**TGT_WAIT_TOTAL**
+
+- 意味：ground truth で target 側が待つべき turn の数です。
+- 計算：ground truth の `<tgt>...</tgt>` が、前後の空白を除いたうえで `<|wait|>` と完全に一致する turn を数えます。
+
+**TURN_COUNT**
+
+- 意味：選択されたすべての test record で、実際に評価した assistant turn の総数です。
+- 計算：`records` に含まれる、生成・評価対象となった assistant 出力をすべて合計します。
 
 #### Test Outputs - step 50
+
+- tolerance window size: 1.0 s
+- 以下は小規模テストの結果です。左側が ground truth、右側がモデル出力です。
 
 ```text
 Test Metrics

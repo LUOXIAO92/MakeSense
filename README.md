@@ -1,3 +1,5 @@
+English | [简体中文](README_zh-cn.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
+
 # MakeSense: Sense Aware Simultaneous Speech Translation
 
 MakeSense is a research/data-generation project for building sense-aware training data and validation pipelines for simultaneous speech translation models with ASR/transcription support.
@@ -243,10 +245,80 @@ Hyper Parmeters
 
 ### Results
 
-- tolerance window size: 1.0 s
-- Following is small scale test, left is ground truth, right is model output. I have disabled the thinking, but thinking content still occurs. An in-depth check is needed.
+#### Metrics
+
+These strict streaming test metrics measure protocol validity, generation stopping behavior, and wait/release decisions for each assistant turn. They do **not** directly measure ASR word accuracy or translation semantic quality.
+
+**POSTPROCESSED_TURN_STOP_RATE**
+
+- Meaning: the rate of turns whose postprocessed output is a clean, complete protocol output.
+- Calculation: `postprocessed_turn_stop_turns / TURN_COUNT`, where a turn counts as stopped when the postprocessed text is protocol-valid and exactly matches the normalized `<src>...</src><tgt>...</tgt>` output.
+
+**PROTOCOL_VALID_RATE**
+
+- Meaning: the rate of turns whose model output follows the required protocol.
+- Calculation: `protocol_valid_turns / TURN_COUNT`, where a turn is valid only if it matches `<src>...</src><tgt>...</tgt>` and does not contain nested source/target tags inside either field.
+
+**RAW_TURN_STOP_RATE**
+
+- Meaning: the rate of turns whose raw decoded generation stops at the configured generation stop token.
+- Calculation: `raw_turn_stop_turns / TURN_COUNT`, where a turn counts as stopped when the raw decoded text continues from the postprocessed text with `generation_stop`.
+
+**RECORD_COUNT**
+
+- Meaning: the number of selected test records evaluated in this strict streaming test.
+- Calculation: `len(records)`.
+
+**SRC_RELEASE_ACCURACY**
+
+- Meaning: among turns where the ground-truth source side should release transcription text, the rate at which the model also releases source text.
+- Calculation: `src_release_correct / SRC_RELEASE_TOTAL`. This checks only wait vs. non-wait behavior in `<src>...</src>`; it does not check whether the released transcription text is correct.
+
+**SRC_RELEASE_TOTAL**
+
+- Meaning: the number of turns where the ground-truth source side is a non-wait release.
+- Calculation: count of turns where ground-truth `<src>...</src>` is not `<|wait|>`.
+
+**SRC_WAIT_ACCURACY**
+
+- Meaning: among turns where the ground-truth source side should wait, the rate at which the model also waits on the source side.
+- Calculation: `src_wait_correct / SRC_WAIT_TOTAL`. This checks only whether model `<src>...</src>` is `<|wait|>`.
+
+**SRC_WAIT_TOTAL**
+
+- Meaning: the number of turns where the ground-truth source side should wait.
+- Calculation: count of turns where ground-truth `<src>...</src>` is exactly `<|wait|>` after stripping whitespace.
+
+**TGT_RELEASE_ACCURACY**
+
+- Meaning: among turns where the ground-truth target side should release translation text, the rate at which the model also releases target text.
+- Calculation: `tgt_release_correct / TGT_RELEASE_TOTAL`. This checks only wait vs. non-wait behavior in `<tgt>...</tgt>`; it does not check whether the released translation text is semantically correct.
+
+**TGT_RELEASE_TOTAL**
+
+- Meaning: the number of turns where the ground-truth target side is a non-wait release.
+- Calculation: count of turns where ground-truth `<tgt>...</tgt>` is not `<|wait|>`.
+
+**TGT_WAIT_ACCURACY**
+
+- Meaning: among turns where the ground-truth target side should wait, the rate at which the model also waits on the target side.
+- Calculation: `tgt_wait_correct / TGT_WAIT_TOTAL`. This checks only whether model `<tgt>...</tgt>` is `<|wait|>`.
+
+**TGT_WAIT_TOTAL**
+
+- Meaning: the number of turns where the ground-truth target side should wait.
+- Calculation: count of turns where ground-truth `<tgt>...</tgt>` is exactly `<|wait|>` after stripping whitespace.
+
+**TURN_COUNT**
+
+- Meaning: the total number of assistant turns evaluated across all selected test records.
+- Calculation: sum of all generated/evaluated assistant outputs across `records`.
+
 
 #### Test Outputs - step 50
+
+- tolerance window size: 1.0 s
+- Following is small scale test, left is ground truth, right is model output. 
 
 ```text
 Test Metrics
