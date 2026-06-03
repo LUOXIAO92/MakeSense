@@ -18,19 +18,20 @@ from pipeline.runners import ForcedAlignmentRunner, load_pipeline_records_by_par
 from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
 
 
-# DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
-DATASET_ROOT = Path(".") / "dataset_test"
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+# DATASET_ROOT = Path(".") / "dataset_test"
 
-CACHE_ROOT       = Path(".") / "cache_test"
+# CACHE_ROOT       = Path(".") / "cache_test"
+CACHE_ROOT = DATASET_ROOT / "cache"
 INPUT_CACHE_BASE = CACHE_ROOT / "pipeline_3_b2_translation_text_only_gemini-3.1-flash-lite"
 OUTPUT_BASE      = CACHE_ROOT / "pipeline_4_forced_alignment_qwen3forcedaligner"
 
 
 DEFAULT_CONCURRENCY = 1
-MAX_CURRENT_TASKS = 20
+MAX_CURRENT_TASKS = 1
 SHOW_TQDM_BAR = True
 ENABLE_VISUALIZATION = True
-BATCH_SIZE = 1
+BATCH_SIZE = 32
 ALIGN_PROVIDER = "qwen3"  # "qwen3" | "whisperx"
 
 QWEN3_ALIGN_MODELS = {

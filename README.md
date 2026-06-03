@@ -22,17 +22,34 @@ In this project:
 - we **do** create ground-truth-style datasets and pipeline validation surfaces so an omni model can learn simultaneous translation strategy;
 
 ## Requirement
-### Python packages
+
+### Clone repository
 ```bash
-pip install stanza jieba nagisa qwen-asr
-pip install transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard --force-reinstall
+git clone --recursive https://github.com/LUOXIAO92/MakeSense.git 
+```
+
+### Python packages
+
+For dataset preparation:
+- Create a new python env. Dataset preparation needs an independent env since `qwen-asr` incompatible with latest transformers.
+- [Flash attention prebuild wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels)
+```bash
+pip install whisper openai stanza
+pip install qwen-asr --force-reinstall
+pip install torch==2.10 torchaudio==2.10.0 torchvision --force-reinstall # --index-url https://download.pytorch.org/whl/cu130
+```
+
+For training: 
+- Using a python 3.13 env is fine.
+```bash
+pip install stanza jieba nagisa transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard
 pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 ```
-- `qwen-asr` will install outdated `transformers` package
 
 ### Sub module dependence
 - Word aligner: [TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
 - We use [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE) as deafult base model.
+- We also use [MultimodalAssistantMask](https://github.com/LUOXIAO92/MultimodalAssistantMask.git) to build assistant only loss for multimodal inputs.
 
 ## Pipeline
 
@@ -105,6 +122,9 @@ outputs/makesense_lora/
 
 Strict streaming tests generate each assistant turn with only the audio chunks available up to that turn. The number of evaluated records is controlled by `TEST_RECORD_COUNT` in `examples/train_lora.py`: `0` disables tests, `-1` uses the full test split, and a positive value selects up to that many records.
 
+### Customization
+Refer to `src/configs/config.py` and `src/configs/LANGUAGE_PACK_*.py` for pipeline-level, non-training customization. Common configurable items include dataset sampling limits, supported languages, ASR / forced-alignment model names, tokenizer choices, wait token, streaming window size, maximum chunk size, reconstruction-validator high-noise tokens, and per-language language packs / few-shot examples used by segmentation stages.
+
 ### Pipeline order
 
 Run the stages in this order:
@@ -118,17 +138,18 @@ python examples/pipeline_1_download_Emilia.py
 # 2. Initialize PipelineRecord cache shards from dataset metadata.
 python examples/pipeline_2_initialize_cache.py
 
-# 3a. Optional omni ASR + translation path.
-# Use this when testing one-pass multimodal translation behavior.
-python examples/pipeline_3_a_asr_translation_omni.py
-
-# 3b-1. ASR-only path.
+# 3a-1. Recommended ASR path.
 # This fills source transcript artifacts in the cache.
-python examples/pipeline_3_b1_asr.py
+python examples/pipeline_3_a1_asr.py
 
-# 3b-2. Raw translation from the ASR cache.
-# Default is text-only; optional audio-assisted mode is controlled in the script, audio supported omni model is needed.
-python examples/pipeline_3_b2_asr_text_translation.py
+# 3a-2. Recommended ASR-based raw translation path.
+# In practice, ASR followed by omni/audio-assisted correction is more reliable than direct omni ASR,
+# with higher accuracy and stability across Chinese, Japanese, and Korean.
+python examples/pipeline_3_a2_asr_text_translation.py
+
+# 3b. Optional direct omni ASR + translation path.
+# Use this when testing one-pass multimodal translation behavior.
+python examples/pipeline_3_b_asr_translation_omni.py
 
 # 4. Forced alignment for source transcription.
 python examples/pipeline_4_forced_alignment.py
@@ -153,8 +174,8 @@ Recommending sequence is:
 
 ```bash
 python examples/pipeline_2_initialize_cache.py
-python examples/pipeline_3_b1_asr.py
-python examples/pipeline_3_b2_asr_text_translation.py
+python examples/pipeline_3_a1_asr.py
+python examples/pipeline_3_a2_asr_text_translation.py
 python examples/pipeline_4_forced_alignment.py
 python examples/pipeline_5_asr_segmentation.py
 python examples/pipeline_6_translation_reconstruction.py

@@ -1,0 +1,125 @@
+=== JA_B00001_S00527_W000010 ===
+transcription: すみません、さなえさん、入りますよ。今空気を入れ替えますからね。岩瀬氏の部下が牢屋に入ったとき、さなえさんの姿は消えていた。
+
+word='すみません、' start=0.0 end=0.88
+word='さなえ' start=0.88 end=1.28
+word='さん、' start=1.28 end=1.52
+word='入り' start=2.0 end=2.4
+word='ます' start=2.4 end=2.64
+word='よ。' start=2.64 end=2.88
+word='今' start=3.68 end=4.0
+word='空気' start=4.08 end=4.48
+word='を' start=4.48 end=4.56
+word='入れ替え' start=4.56 end=4.88
+word='ます' start=4.88 end=5.12
+word='から' start=5.12 end=5.28
+word='ね。' start=5.28 end=5.52
+word='岩瀬' start=7.36 end=7.76
+word='氏' start=7.76 end=7.92
+word='の' start=7.92 end=8.08
+word='部下' start=8.08 end=8.32
+word='が' start=8.32 end=8.48
+word='牢屋' start=8.48 end=8.8
+word='に' start=8.8 end=8.88
+word='入っ' start=8.88 end=9.12
+word='た' start=9.12 end=9.28
+word='とき、' start=9.28 end=9.6
+word='さなえ' start=10.08 end=10.56
+word='さん' start=10.56 end=10.8
+word='の' start=10.8 end=10.96
+word='姿' start=10.96 end=11.36
+word='は' start=11.36 end=11.6
+word='消え' start=11.84 end=12.16
+word='て' start=12.16 end=12.32
+word='い' start=12.32 end=12.4
+word='た。' start=12.4 end=12.64
+
+---
+=== JA_C9lAGdq4pM8_W000001 ===
+transcription: どうも政治いろいろの学ぶです。内閣府が行った外交に関する世論調査の結果について、自立通信が記事にしています。自立通信の記事を引用します。内閣府は19日。
+
+word='どう' start=0.0 end=0.16
+word='も' start=0.16 end=0.48
+word='政治' start=0.64 end=1.12
+word='いろいろ' start=1.12 end=1.44
+word='の' start=1.44 end=1.6
+word='学ぶ' start=1.6 end=2.0
+word='です。' start=2.0 end=2.4
+word='内閣' start=3.36 end=3.76
+word='府' start=3.76 end=3.92
+word='が' start=3.92 end=4.08
+word='行っ' start=4.48 end=4.48
+word='た' start=4.48 end=4.8
+word='外交' start=5.44 end=5.92
+word='に' start=5.92 end=6.08
+word='関する' start=6.08 end=6.56
+word='世論' start=6.56 end=6.88
+word='調査' start=6.88 end=7.36
+word='の' start=7.36 end=7.44
+word='結果' start=7.44 end=7.84
+word='に' start=7.84 end=7.92
+word='つい' start=7.92 end=8.16
+word='て、' start=8.16 end=8.32
+word='自立' start=8.96 end=9.36
+word='通信' start=9.36 end=9.6
+word='が' start=9.6 end=9.76
+word='記事' start=9.84 end=10.08
+word='に' start=10.08 end=10.16
+word='し' start=10.16 end=10.24
+word='て' start=10.24 end=10.32
+word='い' start=10.32 end=10.4
+word='ます。' start=10.4 end=10.72
+word='自立' start=12.32 end=12.72
+word='通信' start=12.72 end=12.96
+word='の' start=12.96 end=13.12
+word='記事' start=13.12 end=13.44
+word='を' start=13.44 end=13.52
+word='引用' start=13.52 end=13.84
+word='し' start=13.84 end=14.0
+word='ます。' start=14.0 end=14.32
+word='内閣' start=16.0 end=16.4
+word='府' start=16.4 end=16.56
+word='は' start=16.56 end=16.72
+word='19' start=16.8 end=17.28
+word='日。' start=17.28 end=17.6
+
+---
+=== JA_B00001_S01637_W000020 ===
+transcription: 漫画にもいろいろなジャンル、種類がありますね。これを砕けた会話ではなんとかものと言います。例えばホラーもの、S.F.もの、アクションものなどなど。
+
+word='漫画' start=0.0 end=0.48
+word='に' start=0.48 end=0.64
+word='も' start=0.64 end=1.04
+word='いろいろ' start=1.36 end=1.92
+word='な' start=1.92 end=2.16
+word='ジャンル、' start=2.32 end=3.04
+word='種類' start=3.44 end=3.84
+word='が' start=3.84 end=4.16
+word='あり' start=4.24 end=4.4
+word='ます' start=4.4 end=4.72
+word='ね。' start=4.72 end=4.96
+word='これ' start=5.92 end=6.24
+word='を' start=6.24 end=6.56
+word='砕け' start=6.88 end=7.36
+word='た' start=7.36 end=7.68
+word='会話' start=7.76 end=8.24
+word='で' start=8.24 end=8.48
+word='は' start=8.48 end=8.8
+word='なん' start=9.36 end=9.68
+word='と' start=9.68 end=9.76
+word='か' start=9.76 end=10.0
+word='もの' start=10.56 end=11.28
+word='と' start=11.68 end=11.76
+word='言い' start=11.76 end=11.92
+word='ます。' start=11.92 end=12.32
+word='例えば' start=13.2 end=14.08
+word='ホラー' start=14.48 end=15.12
+word='もの、' start=15.12 end=15.6
+word='S.F.' start=16.4 end=17.28
+word='もの、' start=17.28 end=17.76
+word='アクション' start=18.4 end=19.28
+word='もの' start=19.28 end=19.6
+word='など' start=20.0 end=20.48
+word='など。' start=20.48 end=20.64
+
+---

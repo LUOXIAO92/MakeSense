@@ -15,6 +15,8 @@ from pipeline.prompts.time_pressure_segmentation import (
 from pipeline.providers.base import BaseProvider
 from pipeline.providers.retry_error_rendering import (
     ASR_VALIDATION_ISSUE_WINDOW_RE,
+    is_contract_or_validation_error,
+    raise_unless_contract_or_validation_error,
     render_historical_retry_errors,
     render_historical_validation_error,
 )
@@ -46,6 +48,11 @@ def exception_rendering(exceptions: list[Exception]) -> str:
         validation_error_types=ValidateExceptions,
         validation_renderer=_render_historical_validation_error,
     )
+    if not is_contract_or_validation_error(
+        exceptions[-1],
+        validation_error_types=ValidateExceptions,
+    ):
+        return exception_messages
     if isinstance(exceptions[-1], ValidateExceptions):
         exception_messages += f"{len(exceptions)}. **Validation Error**:\n{exceptions[-1]}\n"
     elif "JSON Format Error:" in str(exceptions[-1]) or "Output Format Error" in str(exceptions[-1]):
@@ -124,26 +131,35 @@ class TimePressureSegmentationProvider(BaseProvider):
             retry_user_prompt = user_prompt
             if exceptions:
                 exception_messages = exception_rendering(exceptions)
-                exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
-                retry_user_prompt = exception_messages + retry_user_prompt
+                if exception_messages.strip():
+                    exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
+                    retry_user_prompt = exception_messages + retry_user_prompt
 
             messages = [
                 {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
                 {"role": "user", "content": [{"type": "text", "text": retry_user_prompt}]},
             ]
 
+            attempt_debug: dict[str, str | int] = {
+                "attempt": n_retry + 1,
+                "retry_index": n_retry,
+                "retry": n_retry,  # Backward-compatible debug key for old readers.
+                "max_retries": self.max_retries,
+                "max_attempts": self.max_retries + 1,
+                "scratchpad": "",
+                "result": "",
+                "status": "running",
+                "reason": "",
+                "error": "",
+            }
+            attempts_debug.append(attempt_debug)
             try:
                 response = await self.llm.chat(
                     messages, max_tokens, temperature, top_p, top_k, enable_thinking
                 )
                 scratchpad_text, result_text = self._extract_scratchpad_and_result(response.content)
-                attempt_debug: dict[str, str | int] = {
-                    "retry": n_retry,
-                    "scratchpad": scratchpad_text,
-                    "result": result_text,
-                    "error": "",
-                }
-                attempts_debug.append(attempt_debug)
+                attempt_debug["scratchpad"] = scratchpad_text
+                attempt_debug["result"] = result_text
                 groups = self._parse_segmentation_result(result_text)
 
                 sense_units = SenseUnits(level="minimal", groups=groups)
@@ -168,6 +184,12 @@ class TimePressureSegmentationProvider(BaseProvider):
                 )
 
                 validate_chunking_or_raise(metadata, transcription)
+                attempt_debug["status"] = "succeeded"
+                attempt_debug["reason"] = (
+                    "initial attempt succeeded"
+                    if n_retry == 0
+                    else "retry attempt succeeded"
+                )
 
                 record.source.artifacts.time_pressure_segmentation = TimePressureSegmentationArtifact(
                     sense_units=sense_units,
@@ -182,10 +204,16 @@ class TimePressureSegmentationProvider(BaseProvider):
                 return record
 
             except Exception as e:
-                if attempts_debug:
-                    attempts_debug[-1]["error"] = str(e)
+                attempt_debug["status"] = (
+                    "failed_after_response"
+                    if attempt_debug.get("scratchpad") or attempt_debug.get("result")
+                    else "failed_before_response"
+                )
+                attempt_debug["error"] = str(e)
+                attempt_debug["reason"] = str(e)
                 exceptions.append(e)
                 if n_retry == self.max_retries:
+                    raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
                     exceptions_str = [str(error) for error in exceptions]
                     record.set_debug_time_pressure_segmentation(
                         scratchpad=scratchpad_text,

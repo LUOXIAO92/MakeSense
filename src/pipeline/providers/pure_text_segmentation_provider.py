@@ -18,6 +18,8 @@ from pipeline.schema import (
 from pipeline.providers.base import BaseProvider
 from pipeline.providers.retry_error_rendering import (
     PURE_TEXT_OVERSIZED_LINE_RE,
+    is_contract_or_validation_error,
+    raise_unless_contract_or_validation_error,
     render_historical_retry_errors,
     render_historical_validation_error,
 )
@@ -49,6 +51,11 @@ def exception_rendering(exceptions: list[Exception]) -> str:
         validation_error_types=ValidateExceptions,
         validation_renderer=_render_historical_validation_error,
     )
+    if not is_contract_or_validation_error(
+        exceptions[-1],
+        validation_error_types=ValidateExceptions,
+    ):
+        return exception_messages
     if isinstance(exceptions[-1], ValidateExceptions):
         exception_messages += f"{len(exceptions)}. **Validation Error**:\n{exceptions[-1]}\n"
     elif "JSON Format Error:" in str(exceptions[-1]) or "Output Format Error" in str(exceptions[-1]):
@@ -126,23 +133,42 @@ class PureTextSegmentationProvider(BaseProvider):
             ]
 
             exceptions: list[Exception] = []
+            attempts_debug: list[dict[str, str | int]] = []
+            scratchpad_text = ""
+            result_text = ""
             for n_retry in range(self.max_retries + 1):
                 retry_messages = messages
                 if exceptions:
                     exception_messages = exception_rendering(exceptions)
-                    exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
-                    retry_messages = [
-                        messages[0],
-                        {
-                            "role": "user",
-                            "content": [{"type": "text", "text": exception_messages + user_prompt}],
-                        },
-                    ]
+                    if exception_messages.strip():
+                        exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
+                        retry_messages = [
+                            messages[0],
+                            {
+                                "role": "user",
+                                "content": [{"type": "text", "text": exception_messages + user_prompt}],
+                            },
+                        ]
+                attempt_debug: dict[str, str | int] = {
+                    "attempt": n_retry + 1,
+                    "retry_index": n_retry,
+                    "retry": n_retry,
+                    "max_retries": self.max_retries,
+                    "max_attempts": self.max_retries + 1,
+                    "scratchpad": "",
+                    "result": "",
+                    "status": "running",
+                    "reason": "",
+                    "error": "",
+                }
+                attempts_debug.append(attempt_debug)
                 try:
                     response = await self.llm.chat(
                         retry_messages, max_tokens, temperature, top_p, top_k, enable_thinking
                     )
                     scratchpad_text, result_text = self._extract_scratchpad_and_result_blocks(response.content)
+                    attempt_debug["scratchpad"] = scratchpad_text
+                    attempt_debug["result"] = result_text
                     groups = self._parse_segmentation_result(result_text)
                     validate_pure_text_segmentation_or_raise(
                         language=tgt_lang_code,
@@ -157,10 +183,17 @@ class PureTextSegmentationProvider(BaseProvider):
                         sense_units=sense_units,
                         author=author,
                     )
+                    attempt_debug["status"] = "succeeded"
+                    attempt_debug["reason"] = (
+                        "initial attempt succeeded"
+                        if n_retry == 0
+                        else "retry attempt succeeded"
+                    )
                     record.set_debug_pure_text_segmentation(
                         tgt_lang_code,
                         scratchpad=scratchpad_text,
                         result=result_text,
+                        attempts=attempts_debug,
                     )
                     language_branch.status.pure_text_segmentation = TaskStatus(
                         status=StatusEnum.FINISHED
@@ -168,8 +201,22 @@ class PureTextSegmentationProvider(BaseProvider):
                     break
 
                 except Exception as e:
+                    attempt_debug["status"] = (
+                        "failed_after_response"
+                        if attempt_debug.get("scratchpad") or attempt_debug.get("result")
+                        else "failed_before_response"
+                    )
+                    attempt_debug["error"] = str(e)
+                    attempt_debug["reason"] = str(e)
                     exceptions.append(e)
                     if n_retry == self.max_retries:
+                        raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
+                        record.set_debug_pure_text_segmentation(
+                            tgt_lang_code,
+                            scratchpad=scratchpad_text,
+                            result=result_text,
+                            attempts=attempts_debug,
+                        )
                         language_branch.status.pure_text_segmentation = TaskStatus(
                             status=StatusEnum.FAILED,
                             errors=[f"- Retries: {self.max_retries}\n- Errors: {[str(error) for error in exceptions]}"],

@@ -1,12 +1,5 @@
 """User-facing runner APIs and runner-adjacent utilities."""
 
-from .forced_alignment import ForcedAlignmentRunner
-from .transcription import TranscriptionRunner
-from .time_pressure_segmentation import TimePressureSegmentationRunner
-from .pure_text_segmentation import PureTextSegmentationRunner
-from .target_centric_mapping import TargetCentricMappingRunner
-from .translation_reconstruction import TranslationReconstructionRunner
-from .translation_only import TranslationOnlyRunner
 from .utils import (
     cache_output_path,
     load_metadata_by_part,
@@ -27,6 +20,38 @@ from .utils import (
     visualized_path,
     safe_shard_label,
 )
+
+
+def __getattr__(name: str):
+    if name == "TranscriptionRunner":
+        from .transcription import TranscriptionRunner
+
+        return TranscriptionRunner
+    if name == "ForcedAlignmentRunner":
+        from .forced_alignment import ForcedAlignmentRunner
+
+        return ForcedAlignmentRunner
+    if name == "TimePressureSegmentationRunner":
+        from .time_pressure_segmentation import TimePressureSegmentationRunner
+
+        return TimePressureSegmentationRunner
+    if name == "PureTextSegmentationRunner":
+        from .pure_text_segmentation import PureTextSegmentationRunner
+
+        return PureTextSegmentationRunner
+    if name == "TargetCentricMappingRunner":
+        from .target_centric_mapping import TargetCentricMappingRunner
+
+        return TargetCentricMappingRunner
+    if name == "TranslationReconstructionRunner":
+        from .translation_reconstruction import TranslationReconstructionRunner
+
+        return TranslationReconstructionRunner
+    if name == "TranslationOnlyRunner":
+        from .translation_only import TranslationOnlyRunner
+
+        return TranslationOnlyRunner
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "TranscriptionRunner",

@@ -956,6 +956,7 @@ class ReconstructionValidator:
         *,
         llm: Any | None = None,
         aligner: TransAlignProjectTokenAligner | None = None,
+        aligner_lock: asyncio.Lock | None = None,
         semantic_check_system_prompt: str = SYSTEM_INSTRUCTION_RECONSTRUCTION_SEMANTIC_CHECK,
         semantic_check_user_prompt_template: str = USER_PROMPT_RECONSTRUCTION_SEMANTIC_CHECK,
         blocked_window_gap_threshold: int = 3,
@@ -963,6 +964,7 @@ class ReconstructionValidator:
     ):
         self.llm = llm
         self.aligner = aligner
+        self.aligner_lock = aligner_lock
         self.semantic_check_system_prompt = semantic_check_system_prompt
         self.semantic_check_user_prompt_template = semantic_check_user_prompt_template
         self.blocked_window_gap_threshold = blocked_window_gap_threshold
@@ -1016,14 +1018,25 @@ class ReconstructionValidator:
         enable_thinking: bool = False,
     ) -> str | None:
         self.last_debug = {}
-        source_tokens, source_window_by_token, target_tokens, alignments, diagnostics = self.collect_trigger_diagnostics(
-            source_language_code=source_language_code,
-            target_language_code=target_language_code,
-            source_text=source_text,
-            candidate_reconstruction=candidate_reconstruction,
-            source_tokens=source_tokens,
-            source_window_by_token=source_window_by_token,
-        )
+        if self.aligner_lock is None:
+            source_tokens, source_window_by_token, target_tokens, alignments, diagnostics = self.collect_trigger_diagnostics(
+                source_language_code=source_language_code,
+                target_language_code=target_language_code,
+                source_text=source_text,
+                candidate_reconstruction=candidate_reconstruction,
+                source_tokens=source_tokens,
+                source_window_by_token=source_window_by_token,
+            )
+        else:
+            async with self.aligner_lock:
+                source_tokens, source_window_by_token, target_tokens, alignments, diagnostics = self.collect_trigger_diagnostics(
+                    source_language_code=source_language_code,
+                    target_language_code=target_language_code,
+                    source_text=source_text,
+                    candidate_reconstruction=candidate_reconstruction,
+                    source_tokens=source_tokens,
+                    source_window_by_token=source_window_by_token,
+                )
         source_windows = _format_source_windows(source_tokens, source_window_by_token)
         self.last_debug = {
             "source_tokens": _format_indexed_tokens(source_tokens),

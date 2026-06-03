@@ -31,8 +31,6 @@ class ForcedAlignmentRunner:
 
     def __init__(self, concurrency: int = 4):
         self.concurrency = concurrency
-        self._semaphore = asyncio.Semaphore(concurrency)
-        self._whisperx_lock = asyncio.Lock()
         self._tqdm_bar = TqdmBar()
 
     def reset_progress(
@@ -139,91 +137,75 @@ class ForcedAlignmentRunner:
         }
 
         batch_size = max(1, getattr(provider, "max_inference_batch_size", 1) or 1)
-        pending_iter = iter(range(0, len(pending_records), batch_size))
-        active_tasks: dict[asyncio.Task, list[PipelineRecord]] = {}
         file_lock = asyncio.Lock()
 
-        def schedule_next() -> None:
-            while len(active_tasks) < max_current_tasks:
-                batch_start = next(pending_iter, None)
-                if batch_start is None:
-                    break
-                batch_records = pending_records[batch_start: batch_start + batch_size]
-                task = asyncio.create_task(
-                    self.run_cache_records(
-                        batch_records,
-                        dataset_root=dataset_root,
-                        provider=provider,
-                        existing_output_by_uid=existing_output_by_uid,
+        execution_batch_size = batch_size if self._provider_kind(provider) == "qwen3" else max(1, max_current_tasks)
+        for batch_start in range(0, len(pending_records), execution_batch_size):
+            batch_records = pending_records[batch_start: batch_start + execution_batch_size]
+            result_records = await self.run_cache_records(
+                batch_records,
+                dataset_root=dataset_root,
+                provider=provider,
+                existing_output_by_uid=existing_output_by_uid,
+            )
+            for prerequisite_record, record in zip(batch_records, result_records):
+                existing_output_by_uid[prerequisite_record.uid] = record
+                status = self.record_status(record)
+                if status == "finished":
+                    transcript = record.source.artifacts.transcript
+                    alignment = record.source.artifacts.alignment
+                    transcription_text = transcript.text if transcript else ""
+                    aligned_words = []
+                    if alignment:
+                        aligned_words = apply_mapping_groups(
+                            alignment.tokens,
+                            alignment.words,
+                            language=record.metadata.language,
+                        )
+                    visualized = "\n".join([
+                        f"=== {record.uid} ===",
+                        f"transcription: {transcription_text}",
+                        "",
+                        *[
+                            f"word={word.word!r} start={word.start} end={word.end}"
+                            for word in aligned_words
+                        ],
+                        "",
+                        "---",
+                        "",
+                    ])
+                else:
+                    visualized = "\n".join([
+                        f"=== {record.uid} ===",
+                        f"status: {status}",
+                        "errors:",
+                        json.dumps(record.source.status.forced_alignment.errors, ensure_ascii=False, indent=2),
+                        "",
+                        "---",
+                        "",
+                    ])
+                if enable_visualization:
+                    await upsert_record_and_visualization(
+                        output_path=output_path,
+                        shard_visualized_path=shard_visualized_path,
+                        record=record,
+                        visualized=visualized,
+                        file_lock=file_lock,
                     )
-                )
-                active_tasks[task] = batch_records
-
-        schedule_next()
-        while active_tasks:
-            done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                batch_records = active_tasks.pop(task)
-                result_records = await task
-                for prerequisite_record, record in zip(batch_records, result_records):
-                    existing_output_by_uid[prerequisite_record.uid] = record
-                    status = self.record_status(record)
-                    if status == "finished":
-                        transcript = record.source.artifacts.transcript
-                        alignment = record.source.artifacts.alignment
-                        transcription_text = transcript.text if transcript else ""
-                        aligned_words = []
-                        if alignment:
-                            aligned_words = apply_mapping_groups(
-                                alignment.tokens,
-                                alignment.words,
-                                language=record.metadata.language,
-                            )
-                        visualized = "\n".join([
-                            f"=== {record.uid} ===",
-                            f"transcription: {transcription_text}",
-                            "",
-                            *[
-                                f"word={word.word!r} start={word.start} end={word.end}"
-                                for word in aligned_words
-                            ],
-                            "",
-                            "---",
-                            "",
-                        ])
-                    else:
-                        visualized = "\n".join([
-                            f"=== {record.uid} ===",
-                            f"status: {status}",
-                            "errors:",
-                            json.dumps(record.source.status.forced_alignment.errors, ensure_ascii=False, indent=2),
-                            "",
-                            "---",
-                            "",
-                        ])
-                    if enable_visualization:
-                        await upsert_record_and_visualization(
-                            output_path=output_path,
-                            shard_visualized_path=shard_visualized_path,
-                            record=record,
-                            visualized=visualized,
-                            file_lock=file_lock,
-                        )
-                    else:
-                        await upsert_record(
-                            output_path=output_path,
-                            record=record,
-                            file_lock=file_lock,
-                        )
-                    if status == "finished":
-                        self.update_progress(n_finished=1, n_failed=0)
-                        summary["aligned"] += 1
-                    else:
-                        self.update_progress(n_finished=0, n_failed=1)
-                        errors = record.source.status.forced_alignment.errors
-                        self._tqdm_bar.write_latest_error(errors[-1] if errors else None, uid=record.uid, error_name=status)
-                        summary[status] += 1
-            schedule_next()
+                else:
+                    await upsert_record(
+                        output_path=output_path,
+                        record=record,
+                        file_lock=file_lock,
+                    )
+                if status == "finished":
+                    self.update_progress(n_finished=1, n_failed=0)
+                    summary["aligned"] += 1
+                else:
+                    self.update_progress(n_finished=0, n_failed=1)
+                    errors = record.source.status.forced_alignment.errors
+                    self._tqdm_bar.write_latest_error(errors[-1] if errors else None, uid=record.uid, error_name=status)
+                    summary[status] += 1
         return summary
 
     async def run_cache_shard_qwen3(
@@ -388,19 +370,6 @@ class ForcedAlignmentRunner:
         provider: Qwen3ForcedAlignment | WhisperXForcedAlignment,
         language: str,
     ) -> PipelineRecord:
-        provider_kind = self._provider_kind(provider)
-        if provider_kind == "whisperx":
-            async with self._whisperx_lock:
-                return (
-                    await self._run_alignment_batch(
-                        records=[record],
-                        audio_list=[str(audio)],
-                        text_list=[text],
-                        provider=provider,
-                        languages=[language],
-                    )
-                )[0]
-
         return (
             await self._run_alignment_batch(
                 records=[record],
@@ -420,36 +389,43 @@ class ForcedAlignmentRunner:
         provider: Qwen3ForcedAlignment | WhisperXForcedAlignment,
         languages: list[str],
     ) -> list[PipelineRecord]:
-        async with self._semaphore:
-            for record in records:
-                record.source.status.forced_alignment.status = StatusEnum.RUNNING
-                record.source.status.forced_alignment.errors.clear()
+        for record in records:
+            record.source.status.forced_alignment.status = StatusEnum.RUNNING
+            record.source.status.forced_alignment.errors.clear()
 
-            provider_kind = self._provider_kind(provider)
-            if provider_kind == "qwen3":
-                maybe_tokens_words = provider.align(audio=audio_list, text=text_list, language=languages)
-                if asyncio.iscoroutine(maybe_tokens_words):
-                    tokens_list, words_list = await maybe_tokens_words
-                else:
-                    tokens_list, words_list = maybe_tokens_words
+        unique_languages = set(languages)
+        if len(unique_languages) != 1:
+            raise ValueError(
+                "ForcedAlignmentRunner batch received multiple languages for one "
+                f"forced-alignment provider: {sorted(unique_languages)}"
+            )
+        batch_language = languages[0]
+
+        provider_kind = self._provider_kind(provider)
+        if provider_kind == "qwen3":
+            maybe_tokens_words = provider.align(audio=audio_list, text=text_list, language=batch_language)
+            if hasattr(maybe_tokens_words, "__await__"):
+                tokens_list, words_list = await maybe_tokens_words
             else:
-                tokens_list = []
-                words_list = []
-                for audio, text, _language in zip(audio_list, text_list, languages):
-                    maybe_tokens_words = provider.align(audio=audio, text=text)
-                    if asyncio.iscoroutine(maybe_tokens_words):
-                        tokens, words = await maybe_tokens_words
-                    else:
-                        tokens, words = maybe_tokens_words
-                    tokens_list.append(tokens)
-                    words_list.append(words)
+                tokens_list, words_list = maybe_tokens_words
+        else:
+            tokens_list = []
+            words_list = []
+            for audio, text in zip(audio_list, text_list):
+                maybe_tokens_words = provider.align(audio=audio, text=text)
+                if hasattr(maybe_tokens_words, "__await__"):
+                    tokens, words = await maybe_tokens_words
+                else:
+                    tokens, words = maybe_tokens_words
+                tokens_list.append(tokens)
+                words_list.append(words)
 
-            for record, tokens, words in zip(records, tokens_list, words_list):
-                record.source.artifacts.alignment = AlignmentArtifact(
-                    tokens=tokens,
-                    words=words,
-                    author=provider.model_name,
-                )
-                record.source.status.forced_alignment.status = StatusEnum.FINISHED
+        for record, tokens, words in zip(records, tokens_list, words_list):
+            record.source.artifacts.alignment = AlignmentArtifact(
+                tokens=tokens,
+                words=words,
+                author=provider.model_name,
+            )
+            record.source.status.forced_alignment.status = StatusEnum.FINISHED
 
-            return records
+        return records

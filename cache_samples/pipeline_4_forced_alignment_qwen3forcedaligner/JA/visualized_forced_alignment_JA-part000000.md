@@ -1,0 +1,276 @@
+=== JA_ACoDViff5So_W000029 ===
+transcription: まあえっとこれがいくつかの特別な状態があるんですけれども、性格あるんですけれども、例えば重要なポイントは。
+
+word='まあえっ' start=0.48 end=0.56
+word='と' start=0.56 end=0.72
+word='これ' start=0.72 end=0.96
+word='が' start=0.96 end=1.2
+word='いく' start=1.36 end=1.6
+word='つ' start=1.6 end=1.76
+word='か' start=1.76 end=1.92
+word='の' start=1.92 end=2.24
+word='特別' start=2.24 end=2.72
+word='な' start=2.72 end=3.68
+word='状態' start=3.68 end=4.0
+word='が' start=4.0 end=4.16
+word='ある' start=4.16 end=4.32
+word='ん' start=4.32 end=4.32
+word='です' start=4.32 end=4.56
+word='けれど' start=4.56 end=4.88
+word='も、' start=4.88 end=5.12
+word='性格' start=5.6 end=6.48
+word='ある' start=6.88 end=7.12
+word='ん' start=7.12 end=7.2
+word='です' start=7.2 end=7.36
+word='けれど' start=7.36 end=7.68
+word='も、' start=7.68 end=7.84
+word='例えば' start=7.84 end=8.4
+word='重要' start=9.04 end=9.28
+word='な' start=9.28 end=9.36
+word='ポイント' start=9.36 end=9.76
+word='は。' start=9.76 end=10.0
+
+---
+=== JA__gKKQYSi4mg_W000178 ===
+transcription: と今までのオープンデータだけだと、例えば災害の時たあのあこんなデータあればなって思ってたものとかももしかしたらあるかもしれないのでぜひ探してみてください。
+
+word='と' start=0.08 end=0.48
+word='今' start=0.48 end=0.64
+word='まで' start=0.64 end=0.88
+word='の' start=0.88 end=1.12
+word='オープン' start=1.12 end=1.44
+word='データ' start=1.44 end=1.92
+word='だけ' start=1.92 end=2.24
+word='だ' start=2.24 end=2.4
+word='と、' start=2.4 end=2.88
+word='例えば' start=2.88 end=3.36
+word='災害' start=3.36 end=3.84
+word='の' start=3.84 end=3.92
+word='時' start=3.92 end=4.16
+word='た' start=4.16 end=4.4
+word='あの' start=4.4 end=4.8
+word='あこんな' start=4.88 end=5.44
+word='データ' start=5.44 end=5.76
+word='あれ' start=5.76 end=5.92
+word='ば' start=5.92 end=6.0
+word='なって' start=6.0 end=6.4
+word='思っ' start=6.4 end=6.64
+word='て' start=6.64 end=6.72
+word='た' start=6.72 end=6.88
+word='もの' start=6.88 end=7.2
+word='と' start=7.2 end=7.28
+word='か' start=7.28 end=7.44
+word='も' start=7.44 end=7.76
+word='もしかし' start=8.0 end=8.4
+word='たら' start=8.4 end=8.64
+word='ある' start=8.64 end=8.8
+word='か' start=8.8 end=8.88
+word='も' start=8.88 end=9.04
+word='しれ' start=9.04 end=9.28
+word='ない' start=9.28 end=9.52
+word='の' start=9.52 end=9.68
+word='で' start=9.68 end=9.92
+word='ぜひ' start=10.0 end=10.16
+word='探し' start=10.16 end=10.56
+word='て' start=10.56 end=10.64
+word='み' start=10.64 end=10.72
+word='て' start=10.72 end=10.88
+word='ください。' start=10.88 end=11.44
+
+---
+=== JA_055Z9Ti9z9Y_W000045 ===
+transcription: これがギアです。ギアが緩むと芯が上げ下げできなくなってしまうので、ギアの先に役ねじのナットがついているっていうことですね。はい、分解完了。
+
+word='これ' start=0.0 end=0.24
+word='が' start=0.24 end=0.48
+word='ギア' start=0.56 end=0.96
+word='です。' start=0.96 end=1.68
+word='ギア' start=1.84 end=2.24
+word='が' start=2.24 end=2.32
+word='緩む' start=2.32 end=2.72
+word='と' start=2.72 end=3.12
+word='芯' start=3.2 end=3.52
+word='が' start=3.52 end=3.68
+word='上げ下げ' start=3.68 end=4.08
+word='でき' start=4.08 end=4.32
+word='なく' start=4.32 end=4.56
+word='なっ' start=4.56 end=4.72
+word='て' start=4.72 end=4.8
+word='しまう' start=4.8 end=5.12
+word='の' start=5.12 end=5.28
+word='で、' start=5.28 end=5.44
+word='ギア' start=5.76 end=6.0
+word='の' start=6.0 end=6.08
+word='先' start=6.08 end=6.48
+word='に' start=6.48 end=6.72
+word='役ねじ' start=7.28 end=7.76
+word='の' start=7.76 end=8.0
+word='ナット' start=8.24 end=8.56
+word='が' start=8.56 end=8.64
+word='つい' start=8.64 end=8.88
+word='て' start=8.88 end=8.96
+word='いる' start=8.96 end=9.2
+word='って' start=9.2 end=9.44
+word='いう' start=9.44 end=9.52
+word='こと' start=9.52 end=9.76
+word='です' start=9.76 end=10.0
+word='ね。' start=10.0 end=10.48
+word='はい、' start=11.28 end=11.68
+word='分解' start=11.68 end=12.16
+word='完了。' start=12.16 end=12.56
+
+---
+=== JA__gKKQYSi4mg_W000167 ===
+transcription: あの測量したデータになります。こういったデータであったり、これは奈良県の工事なんですけど。
+
+word='あの' start=0.16 end=0.56
+word='測量' start=0.96 end=1.44
+word='し' start=1.52 end=1.6
+word='た' start=1.6 end=1.92
+word='データ' start=1.92 end=2.32
+word='に' start=2.32 end=2.48
+word='なり' start=2.48 end=2.72
+word='ます。' start=2.72 end=3.12
+word='こう' start=4.32 end=4.48
+word='いっ' start=4.48 end=4.48
+word='た' start=4.48 end=4.64
+word='データ' start=4.64 end=5.04
+word='で' start=5.04 end=5.12
+word='あっ' start=5.12 end=5.2
+word='たり、' start=5.2 end=5.76
+word='これ' start=6.08 end=6.48
+word='は' start=6.48 end=7.12
+word='奈良' start=7.12 end=7.52
+word='県' start=7.52 end=7.84
+word='の' start=7.84 end=8.24
+word='工事' start=8.64 end=9.76
+word='な' start=9.76 end=9.84
+word='ん' start=9.84 end=9.92
+word='です' start=9.92 end=10.08
+word='けど。' start=10.08 end=10.48
+
+---
+=== JA_B8if86uiSic_W000033 ===
+transcription: じゃあ戻したロール紙をここに入れます。えっとケースから紙を引き出し、お好みの長さに切ってご使用くださいと書いてあります。
+
+word='じゃあ' start=0.0 end=0.24
+word='戻し' start=0.24 end=0.64
+word='た' start=0.64 end=0.72
+word='ロール' start=0.72 end=0.96
+word='紙' start=0.96 end=1.2
+word='を' start=1.2 end=1.36
+word='ここ' start=2.0 end=2.16
+word='に' start=2.16 end=2.32
+word='入れ' start=2.72 end=2.88
+word='ます。' start=2.88 end=3.36
+word='えっ' start=3.68 end=3.84
+word='と' start=3.84 end=4.08
+word='ケース' start=4.08 end=4.4
+word='から' start=4.4 end=4.64
+word='紙' start=4.64 end=4.96
+word='を' start=4.96 end=4.96
+word='引き出し、' start=4.96 end=5.84
+word='お' start=5.92 end=6.08
+word='好み' start=6.08 end=6.48
+word='の' start=6.48 end=6.64
+word='長' start=6.64 end=6.88
+word='さ' start=6.88 end=7.04
+word='に' start=7.04 end=7.12
+word='切っ' start=7.12 end=7.36
+word='て' start=7.36 end=7.76
+word='ご' start=7.84 end=8.0
+word='使用' start=8.0 end=8.32
+word='ください' start=8.32 end=8.88
+word='と' start=8.88 end=9.04
+word='書い' start=9.04 end=9.28
+word='て' start=9.28 end=9.36
+word='あり' start=9.36 end=9.52
+word='ます。' start=9.52 end=9.92
+
+---
+=== JA_Y-0K120KsxA_W000042 ===
+transcription: 1100円でまあ使えてしまうということで、この車内ワイファイとエアボックスを連携することによって、もう最強のオーディオができるようになるとまあいうことで、今まで。
+
+word='1100' start=0.0 end=0.8
+word='円' start=0.8 end=0.8
+word='で' start=0.8 end=1.12
+word='まあ' start=1.12 end=1.28
+word='使え' start=1.28 end=1.6
+word='て' start=1.6 end=1.68
+word='しまう' start=1.68 end=1.92
+word='と' start=1.92 end=2.0
+word='いう' start=2.0 end=2.0
+word='こと' start=2.0 end=2.24
+word='で、' start=2.24 end=2.48
+word='この' start=2.96 end=3.28
+word='車内' start=3.28 end=3.6
+word='ワイファイ' start=3.6 end=4.0
+word='と' start=4.0 end=4.24
+word='エア' start=4.24 end=4.48
+word='ボックス' start=4.48 end=4.8
+word='を' start=4.88 end=5.04
+word='連携' start=5.04 end=5.6
+word='する' start=5.6 end=5.84
+word='こと' start=5.84 end=6.08
+word='に' start=6.08 end=6.08
+word='よっ' start=6.08 end=6.24
+word='て、' start=6.24 end=6.32
+word='もう' start=6.32 end=6.56
+word='最強' start=6.56 end=7.2
+word='の' start=7.2 end=7.52
+word='オーディオ' start=7.76 end=8.16
+word='が' start=8.16 end=8.48
+word='できる' start=8.56 end=8.88
+word='よう' start=8.88 end=9.04
+word='に' start=9.04 end=9.12
+word='なる' start=9.12 end=9.44
+word='と' start=9.44 end=9.68
+word='まあ' start=10.0 end=10.16
+word='いう' start=10.16 end=10.24
+word='こと' start=10.24 end=10.48
+word='で、' start=10.48 end=10.8
+word='今' start=10.96 end=11.2
+word='まで。' start=11.2 end=11.6
+
+---
+=== JA_B4lnt-FtXPy_W000004 ===
+transcription: 5年間の国債運営成果を報告した。青瓦台のパクスヒョン国民総統秘書官は、文在寅大統領の革新となる経済政策基本路線、所得主導成長について。
+
+word='5' start=0.08 end=0.16
+word='年間' start=0.16 end=0.72
+word='の' start=0.72 end=0.88
+word='国債' start=1.12 end=1.6
+word='運営' start=1.6 end=2.08
+word='成果' start=2.08 end=2.56
+word='を' start=2.56 end=2.64
+word='報告' start=2.64 end=3.12
+word='し' start=3.12 end=3.2
+word='た。' start=3.2 end=3.36
+word='青瓦' start=4.64 end=5.2
+word='台' start=5.2 end=5.2
+word='の' start=5.2 end=5.44
+word='パクスヒョン' start=5.76 end=6.4
+word='国民' start=6.8 end=7.28
+word='総統' start=7.28 end=7.76
+word='秘書' start=7.76 end=8.08
+word='官' start=8.24 end=8.56
+word='は、' start=8.56 end=8.64
+word='文在' start=9.36 end=9.76
+word='寅' start=9.76 end=9.92
+word='大統領' start=9.92 end=10.56
+word='の' start=10.56 end=10.72
+word='革新' start=10.72 end=11.28
+word='と' start=11.28 end=11.36
+word='なる' start=11.36 end=11.68
+word='経済' start=12.48 end=12.96
+word='政策' start=12.96 end=13.44
+word='基本' start=13.44 end=13.92
+word='路線、' start=13.92 end=14.24
+word='所得' start=15.12 end=15.52
+word='主導' start=15.52 end=15.84
+word='成長' start=15.84 end=16.32
+word='に' start=16.32 end=16.4
+word='つい' start=16.4 end=16.72
+word='て。' start=16.72 end=16.88
+
+---

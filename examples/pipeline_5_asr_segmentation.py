@@ -17,24 +17,27 @@ from pipeline.runners import TimePressureSegmentationRunner, load_pipeline_recor
 from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
 
 
-CACHE_ROOT       = Path(".") / "cache_test"
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+
+# CACHE_ROOT       = Path(".") / "cache_test"
+CACHE_ROOT   = DATASET_ROOT / "cache"
 INPUT_CACHE_BASE = CACHE_ROOT / "pipeline_4_forced_alignment_qwen3forcedaligner"
-OUTPUT_BASE      = CACHE_ROOT / "pipeline_5_asr_segmentation_gemini-3.1-flash-lite"
+OUTPUT_BASE      = CACHE_ROOT / "pipeline_5_asr_segmentation_deepseek-v4-flash"
 
 
 API_KEY = os.environ.get("OPEN_ROUTER_API_KEY")
 BASE_URL = os.environ.get("OPEN_ROUTER_BASE_URL")
-MODEL_NAME = "google/gemini-3.1-flash-lite"
+MODEL_NAME = "deepseek/deepseek-v4-flash"
 
 # BASE_URL="http://127.0.0.1:12345/v1"
 # MODEL_NAME="qwen3.6-35b-a3b"
 
-DEFAULT_CONCURRENCY = 20
-MAX_CURRENT_TASKS = 40
-MAX_TOKENS = 8192
+DEFAULT_CONCURRENCY = 128
+MAX_CURRENT_TASKS = 512
+MAX_TOKENS = 42000
 TEMPERATURE = 0.6
 TOP_P = 0.95
-TOP_K = 40
+TOP_K = 20
 ENABLE_THINKING = False
 ENABLE_VISUALIZATION = True
 SHOW_TQDM_BAR = True

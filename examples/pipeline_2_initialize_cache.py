@@ -11,12 +11,13 @@ from pipeline.schema import PipelineRecord, RawTranslationArtifact, StatusEnum, 
 from configs.config import Config
 
 
-# DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
-DATASET_ROOT = Path(".") / "dataset_test"
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+# DATASET_ROOT = Path(".") / "dataset_test"
 TRANSCRIPTION_ROOT = DATASET_ROOT / "transcription"
 TRANSLATION_ROOT   = DATASET_ROOT / "translation"
 
-CACHE_ROOT  = Path(".") / "cache_test"
+# CACHE_ROOT  = Path(".") / "cache_test"
+CACHE_ROOT = DATASET_ROOT / "cache"
 OUTPUT_BASE = CACHE_ROOT / "pipeline_2_initialized"
 
 

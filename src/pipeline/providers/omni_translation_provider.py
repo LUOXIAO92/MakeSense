@@ -25,6 +25,8 @@ from pipeline.schema import (
 from pipeline.providers.base import BaseProvider
 from pipeline.providers.retry_error_rendering import (
     STRUCTURED_VALIDATION_BULLET_RE,
+    is_contract_or_validation_error,
+    raise_unless_contract_or_validation_error,
     render_historical_retry_errors,
     render_historical_validation_error,
 )
@@ -48,6 +50,11 @@ def exception_rendering(exceptions: list[Exception]) -> str:
         validation_error_types=ValidateExceptions,
         validation_renderer=_render_historical_validation_error,
     )
+    if not is_contract_or_validation_error(
+        exceptions[-1],
+        validation_error_types=ValidateExceptions,
+    ):
+        return exception_messages
     if isinstance(exceptions[-1], ValidateExceptions):
         exception_messages += f"{len(exceptions)}. **Validation Error**:\n{exceptions[-1]}\n"
     else:
@@ -215,6 +222,7 @@ class OmniTranslationProvider(BaseProvider):
             except Exception as e:
                 exceptions.append(e)
                 if n_retry == self.max_retries:
+                    raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
                     errors = terminal_error_rendering(exceptions, self.max_retries)
                     record.source.status.asr = TaskStatus(
                         status=StatusEnum.FAILED,

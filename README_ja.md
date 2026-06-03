@@ -4,13 +4,13 @@
 
 MakeSense は、同時音声翻訳モデル向けに sense-aware な学習データと検証パイプラインを作るための研究・データ生成プロジェクトです。ASR / 書き起こしタスクにも対応します。
 
-音声翻訳を、逐次的なマルチターン対話タスクとして扱うことを目指しています。音声がチャンクごとに届き、モデルはその時点で原文の書き起こしを出すか、訳文を出すか、あるいは追加の文脈を待つかを学習します。
+このプロジェクトでは、音声翻訳を逐次的なマルチターン対話として扱います。音声がチャンクごとに届き、モデルはその時点で原文の書き起こしを出すのか、訳文を出すのか、それとももう少し文脈を待つのかを学習します。
 
-現在のリポジトリでは、データセット構築 pipeline と学習データ生成ユーティリティを提供しています。ホットワード / 指定訳語のサポートと推論バックエンドは今後の作業です。
+現在のリポジトリでは、データセット構築 pipeline と学習データ生成ユーティリティを提供しています。ホットワード / 指定訳語のサポートと推論バックエンドは今後追加予定です。
 
 ## プロジェクト概要
 
-目標：ASR / 書き起こし能力も備えた、ストリーミング同時音声翻訳向けの omni / multimodal model を学習すること。
+目標：ASR / 書き起こし能力も持つ omni / multimodal model に、ストリーミング同時音声翻訳の振る舞いを学習させること。
 
 本プロジェクトは以下の論文から着想を得ています。
 - 無限入力ウィンドウ / time-pressure 同時翻訳：[InfiniSST: Simultaneous Translation of Unbounded Speech with Large Language Model](https://arxiv.org/pdf/2503.02969)
@@ -18,21 +18,38 @@ MakeSense は、同時音声翻訳モデル向けに sense-aware な学習デー
 
 本プロジェクトでは：
 - sense-unit detector、audio encoder、LLM backbone alignment をゼロから学習することは**しません**。
-- モデルアーキテクチャは**変更しません**。無限時間のストリーミング翻訳は、実行時のスライディングウィンドウ型コンテキスト管理で扱います。
-- ground-truth 形式に近いデータセットと pipeline 検証用の surface を作り、omni model が同時翻訳の戦略を学習できるようにします。
+- モデルアーキテクチャは**変更しません**。長時間のストリーミング翻訳は、実行時のスライディングウィンドウ型コンテキスト管理で扱います。
+- ground-truth に近いデータセットと pipeline 検証の仕組みを作り、omni model が同時翻訳の戦略を学習できるようにします。
 
 ## 要件
-### Python packages
+
+### Clone repository
 ```bash
-pip install stanza jieba nagisa qwen-asr
-pip install transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard --force-reinstall
+git clone --recursive https://github.com/LUOXIAO92/MakeSense.git 
+```
+
+### Python packages
+
+データセット準備用：
+- データセット準備には専用の Python 環境を使うことを推奨します。`qwen-asr` は新しい `transformers` と互換性がないため、学習用環境とは分けてください。
+- Flash Attention は、必要に応じてこちらの prebuilt wheel を参照してください：[Flash attention prebuild wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels)
+```bash
+pip install whisper openai stanza
+pip install qwen-asr --force-reinstall
+pip install torch==2.10 torchaudio==2.10.0 torchvision --force-reinstall # --index-url https://download.pytorch.org/whl/cu130
+```
+
+学習用：
+- 学習環境では Python 3.13 を使っても問題ありません。
+```bash
+pip install stanza jieba nagisa transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard
 pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 ```
-- `qwen-asr` は古い `transformers` をインストールします。
 
 ### サブモジュール依存
 - 単語アライナー：[TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
 - デフォルトのベースモデルには [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE) を使います。
+- マルチモーダル入力に対する assistant-only loss の構築には [MultimodalAssistantMask](https://github.com/LUOXIAO92/MultimodalAssistantMask.git) を使います。
 
 ## Pipeline
 
@@ -51,9 +68,9 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 
 ## 使い方：データセット pipeline 全体を実行する
 
-現在のワークフローは `examples/` 配下のステージスクリプトで実行します。各ステージは前段の cache を読み込み、新しいステージ cache を書き出します。既存の JSONL cache から再開することもできます。
+現在のワークフローは `examples/` 配下のステージスクリプトで実行します。各ステージは前段の cache を読み込み、新しいステージ cache を書き出します。既存の JSONL cache から続きを再開することもできます。
 
-実行前に、**各 example スクリプト冒頭の設定ブロック**を確認してください。よく使う項目は dataset/cache roots、model names、target languages、`ENABLE_THINKING`、`TOP_P`、`TOP_K`、必要に応じて `ENABLE_VISUALIZATION` です。
+実行前に、**各 example スクリプト冒頭の設定ブロック**を確認してください。よく使う項目には dataset/cache のパス、モデル名、対象言語、`ENABLE_THINKING`、`TOP_P`、`TOP_K`、必要に応じて `ENABLE_VISUALIZATION` などがあります。
 
 ### 現在使えるもの
 
@@ -68,9 +85,9 @@ TODO：
 - [ ] **次に高い優先度：** 学習済み streaming model を実行するための inference backend を追加する。
 - [ ] training / inference context 向けに hot words と hot translations のサポートを追加する。
 
-### LoRA 学習
+### LoRA 学習エントリ
 
-デフォルトの LoRA 学習例は `google/gemma-4-E2B-it` 向けです。Transformers の多モーダルモデルに PEFT LoRA を載せ、実音声を分割して学習に使います。学習中の指標はプロジェクト側で管理する TensorBoard ログに記録し、ストリーミング評価の結果はテスト指標ファイルに保存します。
+デフォルトの LoRA 学習例は `google/gemma-4-E2B-it` 向けです。Transformers のマルチモーダルモデルに PEFT LoRA を載せ、実音声チャンクを使って学習します。学習中の指標はプロジェクト側で管理する TensorBoard scalar ログに記録し、strict streaming test の指標も出力します。
 
 データセット、モデル、LoRA、checkpoint、モニタリング関連の設定は、次のスクリプト冒頭で変更できます。
 
@@ -85,13 +102,13 @@ examples/train_lora.py
 - `SAVE_PROCESSOR`
 - `TEST_STEPS`、`TEST_MAX_NEW_TOKENS`、`TEST_RECORD_COUNT`
 
-学習を実行します。
+学習を実行します：
 
 ```bash
 PYTHONPATH=src python examples/train_lora.py
 ```
 
-学習結果の LoRA adapter と monitoring ファイルは、設定した `OUTPUT_DIR` に書き込まれます。
+LoRA adapter、checkpoint、monitoring ファイルは、設定した `OUTPUT_DIR` に書き込まれます。
 
 ```text
 outputs/makesense_lora/
@@ -103,7 +120,10 @@ outputs/makesense_lora/
 └── test_metrics.json
 ```
 
-ストリーミング評価では、各 assistant turn の生成時に、その時点までに到着している音声チャンクだけをモデルに渡します。評価に使うレコード数は `examples/train_lora.py` の `TEST_RECORD_COUNT` で指定します。`0` なら評価を行わず、`-1` なら test split 全体を使い、正の値ならその件数までを評価します。
+strict streaming test では、各 assistant turn の生成時に、その時点までに到着している音声チャンクだけをモデルに渡します。評価に使うレコード数は `examples/train_lora.py` の `TEST_RECORD_COUNT` で指定します。`0` なら評価を行わず、`-1` なら test split 全体を使い、正の値ならその件数までを評価します。
+
+### カスタマイズ
+pipeline レベルの非学習設定を調整する場合は、`src/configs/config.py` と `src/configs/LANGUAGE_PACK_*.py` を参照してください。主に、データのサンプリング範囲、対応言語、ASR / forced-alignment モデル、tokenizer、wait token、ストリーミング window size、最大 chunk size、reconstruction validator 用の high-noise tokens、各言語の language pack / few-shot examples などを設定できます。
 
 ### Pipeline の実行順序
 
@@ -118,17 +138,17 @@ python examples/pipeline_1_download_Emilia.py
 # 2. dataset metadata から PipelineRecord cache shards を初期化します。
 python examples/pipeline_2_initialize_cache.py
 
-# 3a. 任意の omni ASR + translation 経路。
+# 3a-1. 推奨 ASR 経路。
+# source 側の書き起こし結果を cache に補完します。
+python examples/pipeline_3_a1_asr.py
+
+# 3a-2. 推奨される ASR ベースの raw translation 経路。
+# 実測では、中国語・日本語・韓国語のいずれでも、ASR の後に omni/audio-assisted translation で補正する方が、direct omni ASR より精度と安定性が高くなります。
+python examples/pipeline_3_a2_asr_text_translation.py
+
+# 3b. 任意の direct omni ASR + translation 経路。
 # one-pass multimodal translation の挙動を確認するときに使います。
-python examples/pipeline_3_a_asr_translation_omni.py
-
-# 3b-1. ASR-only path。
-# source transcript artifacts を cache に書き込みます。
-python examples/pipeline_3_b1_asr.py
-
-# 3b-2. ASR cache から raw translation を生成します。
-# デフォルトは text-only です。audio-assisted mode はスクリプト内で制御し、audio 対応 omni model が必要です。
-python examples/pipeline_3_b2_asr_text_translation.py
+python examples/pipeline_3_b_asr_translation_omni.py
 
 # 4. source transcription の forced alignment。
 python examples/pipeline_4_forced_alignment.py
@@ -145,7 +165,7 @@ python examples/pipeline_7_pure_text_segmentation.py
 # 8. target sense units から source token ids への target-centric mapping。
 python examples/pipeline_8_target_centric_mapping.py
 
-# 9. 完了済み pipeline-8 cache state から最終データセットを収集 / export します。
+# 9. 完了済み pipeline-8 cache から最終データセットを収集 / export します。
 python examples/pipeline_9_collect_dataset.py
 ```
 
@@ -153,8 +173,8 @@ python examples/pipeline_9_collect_dataset.py
 
 ```bash
 python examples/pipeline_2_initialize_cache.py
-python examples/pipeline_3_b1_asr.py
-python examples/pipeline_3_b2_asr_text_translation.py
+python examples/pipeline_3_a1_asr.py
+python examples/pipeline_3_a2_asr_text_translation.py
 python examples/pipeline_4_forced_alignment.py
 python examples/pipeline_5_asr_segmentation.py
 python examples/pipeline_6_translation_reconstruction.py

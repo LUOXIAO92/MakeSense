@@ -30,10 +30,11 @@ from pipeline.runners import (
 from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
 
 
-# DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
-DATASET_ROOT = Path(".") / "dataset_test"
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+# DATASET_ROOT = Path(".") / "dataset_test"
 
-CACHE_ROOT       = Path(".") / "cache_test"
+# CACHE_ROOT       = Path(".") / "cache_test"
+CACHE_ROOT       = DATASET_ROOT / "cache"
 INPUT_CACHE_BASE = CACHE_ROOT / "pipeline_3_b1_asr_qwen3asr1.7b"
 OUTPUT_BASE      = CACHE_ROOT / "pipeline_3_b2_translation_text_only_gemini-3.1-flash-lite"
 
@@ -44,13 +45,13 @@ MODEL_NAME = "google/gemini-3.1-flash-lite"
 # BASE_URL="http://127.0.0.1:12345/v1"
 # MODEL_NAME="qwen3.6-27b"
 
-DEFAULT_CONCURRENCY = 3
-MAX_CURRENT_TASKS = 20
+DEFAULT_CONCURRENCY = 128
+MAX_CURRENT_TASKS = 512
 MAX_RETRIES = 5
-MAX_TOKENS = 8192
+MAX_TOKENS = 42000
 TEMPERATURE = 0.6
 TOP_P = 0.95
-TOP_K = 40
+TOP_K = 20
 ENABLE_THINKING = False
 ENABLE_VISUALIZATION = True
 ENABLE_AUDIO_ASSISTED_TRANSLATION = True

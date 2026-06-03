@@ -20,23 +20,27 @@ from pipeline.runners import (
 )
 from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
 
-CACHE_ROOT       = Path(".") / "cache_test"
-INPUT_CACHE_BASE = CACHE_ROOT / "pipeline_6_translation_reconstruction_gemini-3.1-flash-lite"
-OUTPUT_BASE      = CACHE_ROOT / "pipeline_7_pure_text_segmentation_gemini-3.1-flash-lite"
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+
+# CACHE_ROOT       = Path(".") / "cache_test"
+CACHE_ROOT   = DATASET_ROOT / "cache"
+INPUT_CACHE_BASE = CACHE_ROOT / "pipeline_6_translation_reconstruction_deepseek-v4-flash"
+OUTPUT_BASE      = CACHE_ROOT / "pipeline_7_pure_text_segmentation_deepseek-v4-flash"
 
 BASE_URL = os.environ.get("OPEN_ROUTER_BASE_URL")
 API_KEY = os.environ.get("OPEN_ROUTER_API_KEY")
-MODEL_NAME = "google/gemini-3.1-flash-lite"
+MODEL_NAME = "deepseek/deepseek-v4-flash"
+# MODEL_NAME = "google/gemini-3.1-flash-lite"
 
 # BASE_URL="http://127.0.0.1:12345/v1"
 # MODEL_NAME="qwen3.6-27b@q6_k"
 
-DEFAULT_CONCURRENCY = 20
-MAX_CURRENT_TASKS = 60
-MAX_TOKENS = 8192
+DEFAULT_CONCURRENCY = 128
+MAX_CURRENT_TASKS = 512
+MAX_TOKENS = 42000
 TEMPERATURE = 0.6
 TOP_P = 0.95
-TOP_K = 40
+TOP_K = 20
 MAX_RETRIES = 5
 ENABLE_THINKING = False
 ENABLE_VISUALIZATION = True

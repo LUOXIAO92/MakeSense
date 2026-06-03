@@ -16,6 +16,8 @@ from pipeline.prompts.target_centric_mapping import (
 from pipeline.providers.base import BaseProvider
 from pipeline.providers.retry_error_rendering import (
     MAPPING_LOCAL_REGION_LINE_RE,
+    is_contract_or_validation_error,
+    raise_unless_contract_or_validation_error,
     render_historical_retry_errors,
     render_historical_validation_error,
 )
@@ -24,6 +26,7 @@ from pipeline.validators.target_centric_mapping_validator import (
     SEMANTIC_CHECK_MAX_RETRIES,
     SYSTEM_INSTRUCTION_MAPPING_SEMANTIC_CHECK,
     TargetCentricMappingDependencyError,
+    TargetCentricMappingSemanticFeedbackError,
     TargetCentricMappingValidationError,
     build_local_regions_with_inline_triggers,
     collect_level2_mapping_diagnostics,
@@ -51,6 +54,11 @@ def exception_rendering(exceptions: list[Exception]) -> str:
         validation_error_types=ValidateExceptions,
         validation_renderer=_render_historical_validation_error,
     )
+    if not is_contract_or_validation_error(
+        exceptions[-1],
+        validation_error_types=ValidateExceptions,
+    ):
+        return exception_messages
     if "JSON Format Error:" in str(exceptions[-1]) or "Output Format Error" in str(exceptions[-1]):
         exception_messages += f"{len(exceptions)}. **JSON Format Error**:\n{exceptions[-1]}\n"
     else:
@@ -119,23 +127,42 @@ class TargetCentricMappingProvider(BaseProvider):
             ]
 
             exceptions: list[Exception] = []
+            attempts_debug: list[dict[str, str | int]] = []
+            scratchpad_text = ""
+            result_text = ""
             for n_retry in range(self.max_retries + 1):
                 retry_messages = messages
                 if exceptions:
                     exception_messages = exception_rendering(exceptions)
-                    exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
-                    retry_messages = [
-                        messages[0],
-                        {
-                            "role": "user",
-                            "content": [{"type": "text", "text": exception_messages + user_prompt}],
-                        },
-                    ]
+                    if exception_messages.strip():
+                        exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
+                        retry_messages = [
+                            messages[0],
+                            {
+                                "role": "user",
+                                "content": [{"type": "text", "text": exception_messages + user_prompt}],
+                            },
+                        ]
+                attempt_debug: dict[str, str | int] = {
+                    "attempt": n_retry + 1,
+                    "retry_index": n_retry,
+                    "retry": n_retry,
+                    "max_retries": self.max_retries,
+                    "max_attempts": self.max_retries + 1,
+                    "scratchpad": "",
+                    "result": "",
+                    "status": "running",
+                    "reason": "",
+                    "error": "",
+                }
+                attempts_debug.append(attempt_debug)
                 try:
                     response = await self.llm.chat(
                         retry_messages, max_tokens, temperature, top_p, top_k, enable_thinking
                     )
                     scratchpad_text, result_text = self._extract_scratchpad_and_result_blocks(response.content)
+                    attempt_debug["scratchpad"] = scratchpad_text
+                    attempt_debug["result"] = result_text
                     mappings = self._parse_mapping_result(result_text)
                     self._validate_mapping_result(record, tgt_lang_code, mappings)
                     semantic_feedback = await self._run_level3_semantic_checks(
@@ -149,17 +176,31 @@ class TargetCentricMappingProvider(BaseProvider):
                         enable_thinking=enable_thinking,
                     )
                     if semantic_feedback:
-                        raise Exception(semantic_feedback)
+                        raise TargetCentricMappingSemanticFeedbackError(semantic_feedback)
                     branch.artifacts.tgt_src_mapping.mappings = mappings
                     branch.artifacts.tgt_src_mapping.author = author
+                    attempt_debug["status"] = "succeeded"
+                    attempt_debug["reason"] = (
+                        "initial attempt succeeded"
+                        if n_retry == 0
+                        else "retry attempt succeeded"
+                    )
                     record.set_debug_target_centric_mapping(
                         tgt_lang_code,
                         scratchpad=scratchpad_text,
                         result=result_text,
+                        attempts=attempts_debug,
                     )
                     branch.status.tgt_src_mapping = TaskStatus(status=StatusEnum.FINISHED)
                     break
                 except TargetCentricMappingDependencyError as e:
+                    attempt_debug["status"] = (
+                        "failed_after_response"
+                        if attempt_debug.get("scratchpad") or attempt_debug.get("result")
+                        else "failed_before_response"
+                    )
+                    attempt_debug["error"] = str(e)
+                    attempt_debug["reason"] = str(e)
                     response_content = getattr(locals().get("response", None), "content", "")
                     scratchpad_text = locals().get("scratchpad_text", "")
                     result_text = locals().get("result_text", "") or response_content
@@ -168,6 +209,7 @@ class TargetCentricMappingProvider(BaseProvider):
                         scratchpad=scratchpad_text,
                         result=result_text,
                         error=str(e),
+                        attempts=attempts_debug,
                     )
                     branch.status.tgt_src_mapping = TaskStatus(
                         status=StatusEnum.FAILED,
@@ -175,6 +217,13 @@ class TargetCentricMappingProvider(BaseProvider):
                     )
                     break
                 except Exception as e:
+                    attempt_debug["status"] = (
+                        "failed_after_response"
+                        if attempt_debug.get("scratchpad") or attempt_debug.get("result")
+                        else "failed_before_response"
+                    )
+                    attempt_debug["error"] = str(e)
+                    attempt_debug["reason"] = str(e)
                     response_content = getattr(locals().get("response", None), "content", "")
                     scratchpad_text = locals().get("scratchpad_text", "")
                     result_text = locals().get("result_text", "") or response_content
@@ -185,9 +234,18 @@ class TargetCentricMappingProvider(BaseProvider):
                             scratchpad=scratchpad_text,
                             result=result_text,
                             error=str(e),
+                            attempts=attempts_debug,
                         )
                     exceptions.append(e)
                     if n_retry == self.max_retries:
+                        raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
+                        record.set_debug_target_centric_mapping(
+                            tgt_lang_code,
+                            scratchpad=scratchpad_text,
+                            result=result_text,
+                            error=str(e),
+                            attempts=attempts_debug,
+                        )
                         branch.status.tgt_src_mapping = TaskStatus(
                             status=StatusEnum.FAILED,
                             errors=[f"- Retries: {self.max_retries}\n- Errors: {[str(error) for error in exceptions]}"],
@@ -397,20 +455,22 @@ class TargetCentricMappingProvider(BaseProvider):
                     },
                 ]
                 if semantic_exceptions:
-                    semantic_messages = [
-                        semantic_messages[0],
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": exception_rendering(semantic_exceptions)
-                                    + f"\nRETRY:{n_retry}/{SEMANTIC_CHECK_MAX_RETRIES}\n\n"
-                                    + semantic_user_prompt,
-                                }
-                            ],
-                        },
-                    ]
+                    exception_messages = exception_rendering(semantic_exceptions)
+                    if exception_messages.strip():
+                        semantic_messages = [
+                            semantic_messages[0],
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": exception_messages
+                                        + f"\nRETRY:{n_retry}/{SEMANTIC_CHECK_MAX_RETRIES}\n\n"
+                                        + semantic_user_prompt,
+                                    }
+                                ],
+                            },
+                        ]
                 try:
                     semantic_response = await self.llm.chat(
                         semantic_messages,
@@ -429,6 +489,7 @@ class TargetCentricMappingProvider(BaseProvider):
                 except Exception as e:
                     semantic_exceptions.append(e)
                     if n_retry == SEMANTIC_CHECK_MAX_RETRIES:
+                        raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
                         semantic_response_content = getattr(locals().get("semantic_response", None), "content", "")
                         semantic_scratchpad, semantic_result = extract_semantic_check_raw_blocks(
                             semantic_response_content

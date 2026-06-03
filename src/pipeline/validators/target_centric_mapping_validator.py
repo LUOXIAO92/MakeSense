@@ -273,6 +273,10 @@ class TargetCentricMappingDependencyError(TargetCentricMappingValidationError):
     """Raised when upstream artifacts cannot support target-centric mapping validation."""
 
 
+class TargetCentricMappingSemanticFeedbackError(TargetCentricMappingValidationError):
+    """Raised when semantic checking finds a concrete mapping error to reflect/retry."""
+
+
 @dataclass(frozen=True)
 class DuplicateSourceTokenDiagnostic:
     target_senseunit_id: int

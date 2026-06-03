@@ -10,7 +10,7 @@ from pipeline.prompts.utils import build_prompt_translation_reconstruction
 from pipeline.providers.translation_reconstruction_provider import (
     TranslationReconstructionProvider,
 )
-from pipeline.validators.reconstruction_validator import ReconstructionValidator
+from pipeline.validators.reconstruction_validator import ReconstructionValidator, TransAlignProjectTokenAligner
 from pipeline.schema import (
     PipelineRecord,
     StatusEnum,
@@ -71,6 +71,18 @@ class TranslationReconstructionRunner:
         self._semaphore = asyncio.Semaphore(concurrency)
         self._file_lock = asyncio.Lock()
         self._tqdm_bar = TqdmBar()
+        self._reconstruction_aligner: TransAlignProjectTokenAligner | None = None
+        self._reconstruction_aligner_init_lock = asyncio.Lock()
+        self._reconstruction_aligner_run_lock = asyncio.Lock()
+
+    async def _get_reconstruction_aligner(self) -> TransAlignProjectTokenAligner:
+        if self._reconstruction_aligner is not None:
+            return self._reconstruction_aligner
+
+        async with self._reconstruction_aligner_init_lock:
+            if self._reconstruction_aligner is None:
+                self._reconstruction_aligner = TransAlignProjectTokenAligner()
+        return self._reconstruction_aligner
 
     def reset_progress(
         self,
@@ -318,6 +330,7 @@ class TranslationReconstructionRunner:
                         validator_source_tokens=debug_payload.get("validator_source_tokens", ""),
                         validator_source_windows=debug_payload.get("validator_source_windows", ""),
                         validator_feedback=debug_payload.get("validator_feedback", ""),
+                        attempts=debug_payload.get("attempts", []),
                     )
                 else:
                     errors = list(record.target.languages[target_language_code].status.reconstruction.errors)
@@ -342,6 +355,7 @@ class TranslationReconstructionRunner:
                         validator_source_tokens=debug_payload.get("validator_source_tokens", ""),
                         validator_source_windows=debug_payload.get("validator_source_windows", ""),
                         validator_feedback=debug_payload.get("validator_feedback", ""),
+                        attempts=debug_payload.get("attempts", []),
                         errors=errors,
                     )
                 await upsert_record(
@@ -467,12 +481,17 @@ class TranslationReconstructionRunner:
                 record=record,
                 target_language_codes=target_language_codes,
             )
+            reconstruction_aligner = await self._get_reconstruction_aligner()
             provider_kwargs = {
                 "llm": self.llm,
                 "system_prompt": system_prompt,
                 "user_prompt_template": user_prompt,
                 "max_retries": self.max_retries,
-                "reconstruction_validator": ReconstructionValidator(llm=self.reconstruction_validator_llm),
+                "reconstruction_validator": ReconstructionValidator(
+                    llm=self.reconstruction_validator_llm,
+                    aligner=reconstruction_aligner,
+                    aligner_lock=self._reconstruction_aligner_run_lock,
+                ),
                 "source_windows_per_validator_window": self.reconstruction_validator_window_size,
             }
             if self.provider_name is not None:

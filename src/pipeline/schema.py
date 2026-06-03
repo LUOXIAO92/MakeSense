@@ -140,9 +140,9 @@ class PipelineRecord(BaseModel):
     target: TargetScope = Field(default_factory=TargetScope)
     cache_version: str = "v4"
     _debug_time_pressure_segmentation: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _debug_pure_text_segmentation: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
-    _debug_translation_reconstruction: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
-    _debug_target_centric_mapping: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
+    _debug_pure_text_segmentation: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
+    _debug_translation_reconstruction: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
+    _debug_target_centric_mapping: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, __context) -> None:
         from configs.config import Config
@@ -160,13 +160,15 @@ class PipelineRecord(BaseModel):
         *,
         scratchpad: str = "",
         result: str = "",
+        attempts: list[dict[str, Any]] | None = None,
     ) -> None:
         self._debug_pure_text_segmentation[language_code] = {
             "scratchpad": scratchpad or "",
             "result": result or "",
+            "attempts": [dict(attempt) for attempt in (attempts or [])],
         }
 
-    def get_debug_pure_text_segmentation(self, language_code: str) -> dict[str, str]:
+    def get_debug_pure_text_segmentation(self, language_code: str) -> dict[str, Any]:
         return dict(self._debug_pure_text_segmentation.get(language_code, {}))
 
     def set_debug_time_pressure_segmentation(
@@ -197,6 +199,7 @@ class PipelineRecord(BaseModel):
         validator_source_tokens: str = "",
         validator_source_windows: str = "",
         validator_feedback: str = "",
+        attempts: list[dict[str, Any]] | None = None,
     ) -> None:
         self._debug_translation_reconstruction[language_code] = {
             "scratchpad": scratchpad or "",
@@ -207,9 +210,10 @@ class PipelineRecord(BaseModel):
             "validator_source_tokens": validator_source_tokens or "",
             "validator_source_windows": validator_source_windows or "",
             "validator_feedback": validator_feedback or "",
+            "attempts": [dict(attempt) for attempt in (attempts or [])],
         }
 
-    def get_debug_translation_reconstruction(self, language_code: str) -> dict[str, str]:
+    def get_debug_translation_reconstruction(self, language_code: str) -> dict[str, Any]:
         return dict(self._debug_translation_reconstruction.get(language_code, {}))
 
     def set_debug_target_centric_mapping(
@@ -219,14 +223,16 @@ class PipelineRecord(BaseModel):
         scratchpad: str = "",
         result: str = "",
         error: str = "",
+        attempts: list[dict[str, Any]] | None = None,
     ) -> None:
         self._debug_target_centric_mapping[language_code] = {
             "scratchpad": scratchpad or "",
             "result": result or "",
             "error": error or "",
+            "attempts": [dict(attempt) for attempt in (attempts or [])],
         }
 
-    def get_debug_target_centric_mapping(self, language_code: str) -> dict[str, str]:
+    def get_debug_target_centric_mapping(self, language_code: str) -> dict[str, Any]:
         return dict(self._debug_target_centric_mapping.get(language_code, {}))
 
 

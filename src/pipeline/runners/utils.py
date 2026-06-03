@@ -782,6 +782,42 @@ def _single_visualization_value(values: dict[str, Any]) -> str:
     return ""
 
 
+def _append_retry_attempts(parts: list[str], attempts: list[dict[str, Any]] | None) -> None:
+    if not attempts:
+        return
+    parts += ["", "attempts:"]
+    for attempt in attempts:
+        retry = attempt.get("retry", attempt.get("retry_index", ""))
+        max_retries = attempt.get("max_retries", "")
+        status = str(attempt.get("status", ""))
+        reason = str(attempt.get("reason", attempt.get("error", "")))
+        retry_label = f"{retry}/{max_retries}" if max_retries != "" else str(retry)
+        parts += [
+            "",
+            f"- retry: {retry_label}",
+            f"  status: {status}",
+            f"  reason: {reason}",
+        ]
+        if status != "failed_after_response":
+            continue
+        validation_items = [
+            ("scratchpad", attempt.get("scratchpad", "")),
+            ("result", attempt.get("result", "")),
+            ("validator_scratchpad", attempt.get("validator_scratchpad", "")),
+            ("validator_result", attempt.get("validator_validator_result", attempt.get("validator_result", ""))),
+            ("validator_order_risk", attempt.get("validator_order_risk", "")),
+            ("validator_source_tokens", attempt.get("validator_source_tokens_inline", attempt.get("validator_source_tokens", ""))),
+            ("validator_source_windows", attempt.get("validator_source_windows", "")),
+            ("validator_feedback", attempt.get("validator_feedback", "")),
+        ]
+        if any(str(value or "").strip() for _, value in validation_items):
+            parts.append("  validation:")
+            for label, value in validation_items:
+                text = str(value or "")
+                if text.strip():
+                    _append_multiline_block(parts, f"    {label}:", text)
+
+
 def visualization_translation_reconstruction(
     uid: str,
     scratchpad: str,
@@ -796,6 +832,7 @@ def visualization_translation_reconstruction(
     validator_source_tokens: str = "",
     validator_source_windows: str = "",
     validator_feedback: str = "",
+    attempts: list[dict[str, Any]] | None = None,
     errors: list[str] | None = None,
 ) -> str:
     parts = [f"=== {uid} ===", ""]
@@ -851,6 +888,7 @@ def visualization_translation_reconstruction(
             parts += ["feed_back:", "```md", "\n".join(feedback_lines).strip(), "```", ""]
     if errors:
         parts += ["errors:", "```json", json.dumps(errors, ensure_ascii=False, indent=2), "```", ""]
+    _append_retry_attempts(parts, attempts)
     parts += ["", "---", ""]
     return "\n".join(parts)
 
@@ -916,10 +954,20 @@ def visualization_time_pressure_segmentation(record: PipelineRecord) -> str:
     if attempts:
         parts += ["", "attempts:"]
         for attempt in attempts:
-            retry = attempt.get("retry", "")
-            parts += ["", f"- retry: {retry}"]
-            _append_multiline_block(parts, "  scratchpad:", str(attempt.get("scratchpad", "")))
-            _append_multiline_block(parts, "  result:", str(attempt.get("result", "")))
+            retry = attempt.get("retry", attempt.get("retry_index", ""))
+            max_retries = attempt.get("max_retries", "")
+            status = attempt.get("status", "")
+            reason = attempt.get("reason", attempt.get("error", ""))
+            retry_label = f"{retry}/{max_retries}" if max_retries != "" else str(retry)
+            parts += [
+                "",
+                f"- retry: {retry_label}",
+                f"  status: {status}",
+                f"  reason: {reason}",
+            ]
+            if status == "failed_after_response":
+                _append_multiline_block(parts, "  scratchpad:", str(attempt.get("scratchpad", "")))
+                _append_multiline_block(parts, "  result:", str(attempt.get("result", "")))
             _append_multiline_block(parts, "  error:", str(attempt.get("error", "")))
     if transcript and alignment and segmentation and record.metadata:
         debug_transcription = Transcription(
@@ -971,6 +1019,7 @@ def visualization_pure_text_segmentation(record: PipelineRecord, target_language
         parts += numbered_result_lines
     else:
         parts.append("")
+    _append_retry_attempts(parts, debug_payload.get("attempts", []))
     parts += ["", "---", ""]
     return "\n".join(parts)
 
@@ -1066,9 +1115,9 @@ def visualization_target_centric_mapping(record: PipelineRecord, target_language
         "",
         f"- max_empty_window_count: {max_empty_window_count}",
         "",
-        "---",
-        "",
     ]
+    _append_retry_attempts(parts, debug_payload.get("attempts", []))
+    parts += ["", "---", ""]
     return "\n".join(parts)
 
 
@@ -1118,10 +1167,9 @@ def failed_visualization_target_centric_mapping(record: PipelineRecord, target_l
         "",
         "errors:",
         debug_payload.get("error", ""),
-        "",
-        "---",
-        "",
     ]
+    _append_retry_attempts(parts, debug_payload.get("attempts", []))
+    parts += ["", "---", ""]
     return "\n".join(parts)
 
 

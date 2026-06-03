@@ -12,6 +12,8 @@ from llm.llm_model import LLM
 from pipeline.providers.base import BaseProvider
 from pipeline.providers.retry_error_rendering import (
     STRUCTURED_VALIDATION_BULLET_RE,
+    is_contract_or_validation_error,
+    raise_unless_contract_or_validation_error,
     render_historical_retry_errors,
     render_historical_validation_error,
 )
@@ -95,12 +97,16 @@ class TranslationReconstructionProvider(BaseProvider):
 
         author = self.llm.model_name
         exceptions: list[Exception] = []
+        attempts_debug: list[dict[str, str | int]] = []
+        scratchpad = ""
+        result_text = ""
         for n_retry in range(self.max_retries + 1):
             user_prompt = self.user_prompt_template
             if exceptions:
                 exception_messages = exception_rendering(exceptions)
-                exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
-                user_prompt = exception_messages + user_prompt
+                if exception_messages.strip():
+                    exception_messages += f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
+                    user_prompt = exception_messages + user_prompt
 
             messages = [
                 {"role": "system", "content": [{"type": "text", "text": self.system_prompt}]},
@@ -108,11 +114,26 @@ class TranslationReconstructionProvider(BaseProvider):
             ]
 
             response = None
+            attempt_debug: dict[str, str | int] = {
+                "attempt": n_retry + 1,
+                "retry_index": n_retry,
+                "retry": n_retry,
+                "max_retries": self.max_retries,
+                "max_attempts": self.max_retries + 1,
+                "scratchpad": "",
+                "result": "",
+                "status": "running",
+                "reason": "",
+                "error": "",
+            }
+            attempts_debug.append(attempt_debug)
             try:
                 response = await self.llm.chat(
                     messages, max_tokens, temperature, top_p, top_k, enable_thinking
                 )
                 result_text, scratchpad = self._parse_reconstruction_response(response.content)
+                attempt_debug["scratchpad"] = scratchpad
+                attempt_debug["result"] = result_text
                 reconstructions = self._parse_reconstruction_result(
                     result_text=result_text,
                     expected_target_language_names=target_language_names,
@@ -139,18 +160,37 @@ class TranslationReconstructionProvider(BaseProvider):
                         text=normalize_generated_text(reconstructions[target_name], code),
                         author=author,
                     )
+                    attempt_debug["status"] = "succeeded"
+                    attempt_debug["reason"] = (
+                        "initial attempt succeeded"
+                        if n_retry == 0
+                        else "retry attempt succeeded"
+                    )
                     self._set_debug_translation_reconstruction(
                         record,
                         code,
                         scratchpad=scratchpad,
                         result=result_text,
+                        attempts=attempts_debug,
                     )
                     branch.status.reconstruction = TaskStatus(status=StatusEnum.FINISHED)
 
                 return record
             except Exception as e:
+                validator_debug = self._reconstruction_validator_debug()
+                if validator_debug:
+                    for key, value in validator_debug.items():
+                        attempt_debug[f"validator_{key}"] = value
+                attempt_debug["status"] = (
+                    "failed_after_response"
+                    if attempt_debug.get("scratchpad") or attempt_debug.get("result") or validator_debug
+                    else "failed_before_response"
+                )
+                attempt_debug["error"] = str(e)
+                attempt_debug["reason"] = str(e)
                 exceptions.append(e)
                 if n_retry == self.max_retries:
+                    raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
                     exceptions_str = [str(error) for error in exceptions]
                     for code in target_language_codes:
                         branch = record.target.languages.setdefault(code, TargetLanguageEntry(language_code=code))
@@ -159,6 +199,7 @@ class TranslationReconstructionProvider(BaseProvider):
                             code,
                             scratchpad=locals().get("scratchpad", ""),
                             result=locals().get("result_text", "") or (response.content if response else ""),
+                            attempts=attempts_debug,
                         )
                         branch.status.reconstruction = TaskStatus(
                             status=StatusEnum.FAILED,
@@ -252,6 +293,7 @@ class TranslationReconstructionProvider(BaseProvider):
         *,
         scratchpad: str = "",
         result: str = "",
+        attempts: list[dict[str, str | int]] | None = None,
     ) -> None:
         validator_debug = self._reconstruction_validator_debug()
         record.set_debug_translation_reconstruction(
@@ -264,6 +306,7 @@ class TranslationReconstructionProvider(BaseProvider):
             validator_source_tokens=validator_debug.get("source_tokens_inline", ""),
             validator_source_windows=validator_debug.get("source_windows", ""),
             validator_feedback=validator_debug.get("feedback", ""),
+            attempts=attempts,
         )
 
     def _parse_reconstruction_response(self, response_text: str) -> tuple[str, str]:
@@ -456,6 +499,11 @@ def exception_rendering(exceptions: list[Exception]) -> str:
         validation_error_types=ValidateExceptions,
         validation_renderer=_render_historical_validation_error,
     )
+    if not is_contract_or_validation_error(
+        exceptions[-1],
+        validation_error_types=ValidateExceptions,
+    ):
+        return exception_messages
     if isinstance(exceptions[-1], ValidateExceptions):
         exception_messages += f"{len(exceptions)}. **Validation Error**:\n{exceptions[-1]}\n"
     elif "JSON Format Error:" in str(exceptions[-1]):

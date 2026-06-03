@@ -11,7 +11,7 @@ from pipeline.runners import load_pipeline_records_by_part_latest
 
 
 CACHE_ROOT          = Path(".") / "cache_test"
-INPUT_CACHE_BASE    = CACHE_ROOT / "pipeline_8_target_centric_mapping_gemini-3.1-flash-lite"
+INPUT_CACHE_BASE    = CACHE_ROOT / "pipeline_8_target_centric_mapping_deepseek-v4-flash"
 OUTPUT_DATASET_ROOT = CACHE_ROOT / "pipeline_9_dataset"
 
 

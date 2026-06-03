@@ -2,35 +2,54 @@
 
 # MakeSense: Sense Aware Simultaneous Speech Translation
 
-MakeSense 是一个面向研究和数据生成的项目，用来为同步语音翻译模型构建具备语义感知能力的训练数据和验证流程，同时支持 ASR / 转写任务。项目目标是把语音翻译改造成增量式多轮对话任务：音频按片段陆续到达，模型学习何时输出源语言转写、何时输出目标语言翻译，以及何时等待更多上下文。
+MakeSense 是一个面向研究和数据生成的项目，用来为同步语音翻译模型构建具备语义感知能力的训练数据和验证流程，同时支持 ASR / 转写任务。
 
-目前，仓库提供数据集构建 pipeline 和训练数据构造工具。热词 / 指定译法支持以及推理后端属于后续工作。
+项目的核心思路是把语音翻译整理成增量式多轮对话：音频一段一段到达，模型需要学会什么时候输出源语言转写、什么时候输出目标语言翻译，以及什么时候继续等待更多上下文。
+
+目前，仓库已经提供数据集构建 pipeline 和训练数据构造工具。热词 / 指定译法支持以及推理后端仍是后续计划。
 
 ## 项目简介
 
-目标：训练一个 omni / 多模态模型，使其具备流式同步语音翻译能力，并额外支持 ASR / 转写。
+目标：训练一个 omni / 多模态模型，使其具备流式同步语音翻译能力，同时保留 ASR / 转写能力。
 
 本项目受到以下论文启发：
 - 无限输入窗口 / time-pressure 同步翻译：[InfiniSST: Simultaneous Translation of Unbounded Speech with Large Language Model](https://arxiv.org/pdf/2503.02969)
 - sense-unit translation：[SIMULSENSE: SENSE-DRIVEN INTERPRETING FOR EFFICIENT SIMULTANEOUS SPEECH TRANSLATION](https://arxiv.org/abs/2509.21932)
 
 在本项目中：
-- 我们**不**从零训练 sense-unit detector、audio encoder 或 LLM backbone alignment；
-- 我们**不**修改模型架构；无限时长的流式翻译由运行时的滑动窗口上下文管理来处理；
-- 我们**会**构建 ground-truth 风格的数据集和 pipeline 验证界面，让 omni 模型学习同步翻译策略；
+- 我们**不**从零训练 sense-unit detector、audio encoder，也不做 LLM backbone alignment；
+- 我们**不**修改模型架构；无限时长的流式翻译通过运行时的滑动窗口上下文管理来实现；
+- 我们**会**构建接近 ground-truth 的数据集和 pipeline 验证流程，让 omni 模型学习同步翻译策略；
 
 ## 环境要求
-### Python packages
+
+### Clone repository
 ```bash
-pip install stanza jieba nagisa qwen-asr
-pip install transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard --force-reinstall
+git clone --recursive https://github.com/LUOXIAO92/MakeSense.git 
+```
+
+### Python packages
+
+用于数据集准备：
+- 建议单独创建一个 Python 环境。数据集准备依赖 `qwen-asr`，而 `qwen-asr` 与较新的 `transformers` 版本不兼容，因此不要和训练环境混用。
+- Flash Attention 可参考预编译 wheel：[Flash attention prebuild wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels)
+```bash
+pip install whisper openai stanza
+pip install qwen-asr --force-reinstall
+pip install torch==2.10 torchaudio==2.10.0 torchvision --force-reinstall # --index-url https://download.pytorch.org/whl/cu130
+```
+
+用于训练：
+- 训练环境可以使用 Python 3.13。
+```bash
+pip install stanza jieba nagisa transformers peft torch torchvision torchaudio torchcodec bitsandbytes tensorboard
 pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 ```
-- `qwen-asr` 会安装较旧版本的 `transformers`。
 
 ### 子模块依赖
 - 词对齐工具：[TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
 - 默认基础模型使用 [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE)。
+- 多模态训练中的 assistant-only loss 由 [MultimodalAssistantMask](https://github.com/LUOXIAO92/MultimodalAssistantMask.git) 构造。
 
 ## Pipeline
 
@@ -49,9 +68,9 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 
 ## 使用方法：运行完整数据集 pipeline
 
-当前工作流由 `examples/` 下的阶段脚本驱动。每个阶段读取上一阶段 cache，写入新的阶段 cache，并且可以从已有 JSONL cache 状态恢复运行。
+当前工作流由 `examples/` 下的阶段脚本驱动。每个阶段读取上一阶段的 cache，写入新的阶段 cache，并且可以基于已有 JSONL cache 继续运行。
 
-运行前请检查**每个 example 脚本顶部的配置区块**。常见配置包括 dataset/cache roots、model names、target languages、`ENABLE_THINKING`、`TOP_P`、`TOP_K`，以及适用场景下的 `ENABLE_VISUALIZATION`。
+运行前请先检查**每个 example 脚本顶部的配置区块**。常见配置包括 dataset/cache 路径、模型名称、目标语言、`ENABLE_THINKING`、`TOP_P`、`TOP_K`，以及适用场景下的 `ENABLE_VISUALIZATION`。
 
 ### 当前可用功能
 
@@ -66,9 +85,9 @@ TODO：
 - [ ] **次高优先级：** 增加推理后端，用于运行训练好的 streaming model。
 - [ ] 为训练和推理上下文增加 hot words 和 hot translations 支持。
 
-### LoRA 训练
+### LoRA 训练入口
 
-默认 LoRA 训练示例使用 `google/gemma-4-E2B-it`。训练路径基于 Transformers 多模态模型和 PEFT LoRA，直接使用真实音频分块；训练指标写入项目管理的 TensorBoard 日志，流式测试结果写入测试指标文件。
+默认 LoRA 训练示例面向 `google/gemma-4-E2B-it`。训练代码基于 Transformers 多模态模型和 PEFT LoRA，直接使用真实音频分块；训练过程会写入项目自管的 TensorBoard 标量日志，并运行严格的流式测试指标。
 
 数据集、模型、LoRA、checkpoint 和监控相关选项都在下面这个脚本顶部配置：
 
@@ -89,7 +108,7 @@ examples/train_lora.py
 PYTHONPATH=src python examples/train_lora.py
 ```
 
-训练会把 LoRA adapter 和 monitoring 文件写入配置的 `OUTPUT_DIR`：
+训练会把 LoRA adapter、checkpoint 和监控文件写入配置的 `OUTPUT_DIR`：
 
 ```text
 outputs/makesense_lora/
@@ -101,7 +120,10 @@ outputs/makesense_lora/
 └── test_metrics.json
 ```
 
-流式测试会严格限制可见上下文：生成每个 assistant turn 时，模型只能使用截至该 turn 已经到达的音频分块。测试记录数由 `examples/train_lora.py` 里的 `TEST_RECORD_COUNT` 控制：`0` 表示不跑测试，`-1` 表示使用完整 test split，正整数表示最多选取对应数量的记录。
+严格流式测试会限制每个 assistant turn 的可见上下文：模型只能使用截至该 turn 已经到达的音频分块。测试记录数由 `examples/train_lora.py` 里的 `TEST_RECORD_COUNT` 控制：`0` 表示不跑测试，`-1` 表示使用完整 test split，正整数表示最多选取对应数量的记录。
+
+### 定制化配置
+如需调整 pipeline 级别的非训练配置，请参考 `src/configs/config.py` 和 `src/configs/LANGUAGE_PACK_*.py`。常见可定制内容包括数据采样范围、支持语言、ASR / forced-alignment 模型、tokenizer、wait token、流式窗口大小、最大 chunk 大小、重建验证器使用的 high-noise tokens，以及各语言的 language pack / few-shot examples。
 
 ### Pipeline 运行顺序
 
@@ -116,17 +138,17 @@ python examples/pipeline_1_download_Emilia.py
 # 2. 从 dataset metadata 初始化 PipelineRecord cache shards。
 python examples/pipeline_2_initialize_cache.py
 
-# 3a. 可选 omni ASR + translation 路径。
+# 3a-1. 推荐的 ASR 路径。
+# 这一步会在 cache 中补齐源语言转写结果。
+python examples/pipeline_3_a1_asr.py
+
+# 3a-2. 推荐的基于 ASR 的 raw translation 路径。
+# 根据实测，在中文、日文、韩文三种语言上，先做 ASR 再用 omni/audio-assisted translation 辅助纠错，通常都比直接用 omni 模型做 ASR 精度更高、更稳。
+python examples/pipeline_3_a2_asr_text_translation.py
+
+# 3b. 可选的 direct omni ASR + translation 路径。
 # 用于测试 one-pass multimodal translation 行为。
-python examples/pipeline_3_a_asr_translation_omni.py
-
-# 3b-1. ASR-only path。
-# 这一步会在 cache 中填入 source transcript artifacts。
-python examples/pipeline_3_b1_asr.py
-
-# 3b-2. 从 ASR cache 生成 raw translation。
-# 默认是 text-only；可选 audio-assisted mode 在脚本中控制，需要支持 audio 的 omni model。
-python examples/pipeline_3_b2_asr_text_translation.py
+python examples/pipeline_3_b_asr_translation_omni.py
 
 # 4. 对 source transcription 执行 forced alignment。
 python examples/pipeline_4_forced_alignment.py
@@ -143,7 +165,7 @@ python examples/pipeline_7_pure_text_segmentation.py
 # 8. 将 target sense units 映射到 source token ids。
 python examples/pipeline_8_target_centric_mapping.py
 
-# 9. 从已完成的 pipeline-8 cache state 收集 / export 最终数据集。
+# 9. 从已完成的 pipeline-8 cache 中收集 / 导出最终数据集。
 python examples/pipeline_9_collect_dataset.py
 ```
 
@@ -151,8 +173,8 @@ python examples/pipeline_9_collect_dataset.py
 
 ```bash
 python examples/pipeline_2_initialize_cache.py
-python examples/pipeline_3_b1_asr.py
-python examples/pipeline_3_b2_asr_text_translation.py
+python examples/pipeline_3_a1_asr.py
+python examples/pipeline_3_a2_asr_text_translation.py
 python examples/pipeline_4_forced_alignment.py
 python examples/pipeline_5_asr_segmentation.py
 python examples/pipeline_6_translation_reconstruction.py
@@ -187,7 +209,7 @@ path/to/output/dir/
 <src>(transcription text)</src><tgt>(target translation text)</tgt>
 ```
 
-当信息不足以稳定输出源语言转写或目标语言翻译时，模型可以输出 `<|wait|>`。
+当信息还不足以稳定输出源语言转写或目标语言翻译时，模型可以输出 `<|wait|>`。
 
 ### Conversation format
 

@@ -24,17 +24,18 @@ from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_pa
 DATASET_ROOT = Path(".") / "dataset_test"
 
 CACHE_ROOT       = Path(".") / "cache_test"
+# CACHE_ROOT       = DATASET_ROOT / "cache"
 INPUT_CACHE_BASE = CACHE_ROOT  / "pipeline_2_initialized"
 OUTPUT_BASE      = CACHE_ROOT  / "pipeline_3_b1_asr_qwen3asr1.7b"
 
 DEFAULT_CONCURRENCY = 1
-MAX_CURRENT_TASKS = 20
+MAX_CURRENT_TASKS = 1
 SHOW_TQDM_BAR = True
-BATCH_SIZE = 1
+BATCH_SIZE = 32
 MAX_RETRIES = 5
 
 ASR_MODELS = {
-    lang_code: Qwen3ASR(model, device_map="mps", max_inference_batch_size=BATCH_SIZE, attn_implementation=None)
+    lang_code: Qwen3ASR(model, device_map="cuda", max_inference_batch_size=BATCH_SIZE, attn_implementation="flash_attention_2")
     for lang_code, model in Config.asr_models.items()
 }
 

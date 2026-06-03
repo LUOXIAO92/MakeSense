@@ -24,9 +24,8 @@ from typing import Any
 
 import torch
 from mm_assistant_mask import (
-    AssistantFrameSpec,
-    build_assistant_frame_masks,
-    build_labels_from_frame_mask,
+    AssistantMaskSpec,
+    build_assistant_labels,
 )
 
 from data_loader.dataset import TrainingExample, TrainingDatasetSplits, build_training_dataset
@@ -216,11 +215,11 @@ def _render_chat(processor: Any, messages: list[ChatMessage]) -> str:
     return str(rendered)
 
 
-def _labels_from_assistant_frames(
+def _labels_from_assistant_mask(
     batch: dict[str, Any],
     *,
     processor: Any,
-    frame_spec: AssistantFrameSpec,
+    spec: AssistantMaskSpec,
 ) -> torch.Tensor:
     input_ids = batch.get("input_ids")
     if not isinstance(input_ids, torch.Tensor):
@@ -229,15 +228,10 @@ def _labels_from_assistant_frames(
         tokenizer = processor.tokenizer
     except AttributeError as exc:
         raise ValueError("Assistant frame masking requires processor.tokenizer") from exc
-    frame_mask = build_assistant_frame_masks(
-        input_ids=input_ids,
+    return build_assistant_labels(
+        batch,
         tokenizer=tokenizer,
-        spec=frame_spec,
-    )
-    return build_labels_from_frame_mask(
-        input_ids=input_ids,
-        frame_mask=frame_mask,
-        attention_mask=batch.get("attention_mask"),
+        spec=spec,
     )
 
 
@@ -261,7 +255,7 @@ class MakeSenseAudioCollator:
         self.max_length = max_length
         self.audio_sampling_rate = audio_sampling_rate
         self.audio_chunk_seconds = audio_chunk_seconds
-        self.assistant_frame_spec = AssistantFrameSpec(
+        self.assistant_mask_spec = AssistantMaskSpec(
             assistant_header=assistant_header,
             assistant_end=assistant_end,
             generation_stop=generation_stop,
@@ -310,10 +304,10 @@ class MakeSenseAudioCollator:
             flat_audio_chunks.extend(audio_chunks)
 
         batch = self._call_processor(rendered_texts, flat_audio_chunks)
-        batch["labels"] = _labels_from_assistant_frames(
+        batch["labels"] = _labels_from_assistant_mask(
             batch,
             processor=self.processor,
-            frame_spec=self.assistant_frame_spec,
+            spec=self.assistant_mask_spec,
         )
         batch.pop("assistant_masks", None)
         batch.pop("completion_mask", None)

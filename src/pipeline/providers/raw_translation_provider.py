@@ -15,6 +15,7 @@ from pipeline.schema import (
     TargetLanguageEntry,
 )
 from pipeline.providers.base import BaseProvider
+from pipeline.providers.retry_error_rendering import raise_unless_contract_or_validation_error
 
 
 class RawTranslationProvider(BaseProvider):
@@ -143,6 +144,7 @@ class RawTranslationProvider(BaseProvider):
                 except Exception as e:
                     exceptions.append(str(e))
                     if n_retry == self.max_retries:
+                        raise_unless_contract_or_validation_error(e)
                         branch.status.raw_translation = TaskStatus(
                             status=StatusEnum.FAILED,
                             errors=exceptions,

@@ -31,7 +31,6 @@ class TranscriptionRunner:
         self.concurrency = concurrency
         self.provider_max_retries = provider_max_retries
         self.provider_name = provider_name
-        self._semaphore = asyncio.Semaphore(concurrency)
         self._tqdm_bar = TqdmBar()
 
     def reset_progress(
@@ -97,31 +96,18 @@ class TranscriptionRunner:
             "prerequisite_invalid": 0,
         }
 
-        pending_iter = iter(pending_records)
-        active_tasks: dict[asyncio.Task, PipelineRecord] = {}
         file_lock = asyncio.Lock()
 
-        def schedule_next() -> None:
-            while len(active_tasks) < max_current_tasks:
-                prerequisite_record = next(pending_iter, None)
-                if prerequisite_record is None:
-                    break
-                task = asyncio.create_task(
-                    self.run_cache_record(
-                        prerequisite_record,
-                        dataset_root=dataset_root,
-                        asr_model=asr_model,
-                        existing_record=existing_output_by_uid.get(prerequisite_record.uid),
-                    )
-                )
-                active_tasks[task] = prerequisite_record
-
-        schedule_next()
-        while active_tasks:
-            done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                prerequisite_record = active_tasks.pop(task)
-                record = await task
+        batch_size = max(1, min(max_current_tasks, getattr(asr_model, "max_inference_batch_size", 1) or 1))
+        for batch_start in range(0, len(pending_records), batch_size):
+            batch_records = pending_records[batch_start: batch_start + batch_size]
+            result_records = await self.run_cache_records(
+                batch_records,
+                dataset_root=dataset_root,
+                asr_model=asr_model,
+                existing_output_by_uid=existing_output_by_uid,
+            )
+            for prerequisite_record, record in zip(batch_records, result_records):
                 existing_output_by_uid[prerequisite_record.uid] = record
                 status = self.record_status(record)
                 if status == "finished":
@@ -162,9 +148,45 @@ class TranscriptionRunner:
                     summary["transcribed"] += 1
                 else:
                     summary[status] += 1
-            schedule_next()
 
         return summary
+
+    async def run_cache_records(
+        self,
+        prerequisite_records: list[PipelineRecord],
+        *,
+        dataset_root: Path,
+        asr_model,
+        existing_output_by_uid: dict[str, PipelineRecord] | None = None,
+    ) -> list[PipelineRecord]:
+        existing_output_by_uid = existing_output_by_uid or {}
+        ready_results: list[PipelineRecord | None] = [None] * len(prerequisite_records)
+        batch_indices: list[int] = []
+        batch_records: list[PipelineRecord] = []
+        audio_list: list[str] = []
+
+        for idx, prerequisite_record in enumerate(prerequisite_records):
+            existing_record = existing_output_by_uid.get(prerequisite_record.uid)
+            if existing_record and self._is_finished_record(existing_record):
+                ready_results[idx] = existing_record
+                continue
+
+            if self._is_finished_record(prerequisite_record):
+                ready_results[idx] = prerequisite_record
+                continue
+
+            batch_indices.append(idx)
+            batch_records.append(prerequisite_record.model_copy(deep=True))
+            audio_list.append(
+                str(dataset_root / "audio" / prerequisite_record.metadata.language / prerequisite_record.metadata.file_name)
+            )
+
+        if batch_records:
+            provided_records = await self.run_records(batch_records, audio_list=audio_list, asr_model=asr_model)
+            for idx, record in zip(batch_indices, provided_records):
+                ready_results[idx] = record
+
+        return [record for record in ready_results if record is not None]
 
     async def run_cache_record(
         self,
@@ -193,29 +215,43 @@ class TranscriptionRunner:
         audio: str | bytes,
         asr_model,
     ) -> PipelineRecord:
-        async with self._semaphore:
-            try:
-                provider_kwargs = {
-                    "asr_model": asr_model,
-                    "max_retries": self.provider_max_retries,
-                }
-                if self.provider_name is not None:
-                    provider_kwargs["name"] = self.provider_name
-                provider = ASRProvider(**provider_kwargs)
-                record = PipelineRecord(uid=meta.uid, metadata=meta)
-                record = await provider.provide(
-                    record=record,
-                    audio=audio,
-                    language_code=meta.language,
-                )
+        records = await self.run_records(
+            [PipelineRecord(uid=meta.uid, metadata=meta)],
+            audio_list=[audio],
+            asr_model=asr_model,
+        )
+        return records[0]
+
+    async def run_records(
+        self,
+        records: list[PipelineRecord],
+        *,
+        audio_list: list[str | bytes],
+        asr_model,
+    ) -> list[PipelineRecord]:
+        try:
+            provider_kwargs = {
+                "asr_model": asr_model,
+                "max_retries": self.provider_max_retries,
+            }
+            if self.provider_name is not None:
+                provider_kwargs["name"] = self.provider_name
+            provider = ASRProvider(**provider_kwargs)
+            records = await provider.provide_batch(
+                records=records,
+                audio_list=audio_list,
+                language_codes=[record.metadata.language for record in records],
+            )
+            for record in records:
                 latest_error = record.source.status.asr.errors[-1] if record.source.status.asr.errors else None
                 if latest_error:
                     self._tqdm_bar.update("Transcription", n_finished=0, n_failed=1)
                     self._tqdm_bar.write_latest_error(latest_error, uid=record.uid, error_name="asr_failed")
                 else:
                     self._tqdm_bar.update("Transcription", n_finished=1, n_failed=0)
-                return record
-            except Exception as e:
-                self._tqdm_bar.update("Transcription", n_finished=0, n_failed=1)
-                self._tqdm_bar.write_latest_error(e, uid=meta.uid)
-                raise
+            return records
+        except Exception as e:
+            self._tqdm_bar.update("Transcription", n_finished=0, n_failed=len(records))
+            for record in records:
+                self._tqdm_bar.write_latest_error(e, uid=record.uid)
+            raise
