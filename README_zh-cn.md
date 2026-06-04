@@ -99,7 +99,9 @@ EXTRA_BODY = {"thinking": {"type": "disabled"}}
 TODO：
 - [x] **高优先级**：用极小样本跑通 `examples/train_lora.py`，确认对话渲染、assistant-only loss 和 1-2 个训练 step 正常。
 - [ ] **高优先级**：完成 `google/gemma-4-E2B-it` 的完整 LoRA 训练。
+  - **Ongoing**：目前主要在准备更大规模的训练数据。计划发布的数据集约包含 8,000 条音频及转写样本，以及 24,000 条用于训练翻译策略的多轮对话轨迹。数据基于 [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset) 二次处理而来；感谢 Emilia-Dataset 项目提供高质量的多语言音频资源。
 - [ ] **次高优先级：** 增加推理后端，用于运行训练好的 streaming model。
+  - **Ongoing**：推理侧的实现正在 [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git) 中推进。
 - [ ] 为训练和推理上下文增加 hot words 和 hot translations 支持。
 
 ### LoRA 训练入口

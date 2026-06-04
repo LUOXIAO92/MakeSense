@@ -99,7 +99,9 @@ EXTRA_BODY = {"thinking": {"type": "disabled"}}
 TODO:
 - [x] **높은 우선순위**: 아주 작은 샘플로 `examples/train_lora.py` 를 실행해 대화 템플릿, assistant-only loss, 1〜2 step 학습이 제대로 동작하는지 확인한다.
 - [ ] **높은 우선순위**: `google/gemma-4-E2B-it` 의 LoRA 학습을 끝까지 실행한다.
+  - **Ongoing**: 지금은 더 큰 규모의 학습 데이터를 준비하고 있습니다. 공개 예정인 데이터셋에는 약 8,000개의 오디오·전사 샘플과, 번역 전략 학습에 쓰일 멀티턴 대화 궤적 데이터 약 24,000개가 포함됩니다. 이 데이터는 [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset) 을 바탕으로 2차 가공한 것입니다. 좋은 다국어 오디오 데이터를 공개해 준 Emilia-Dataset 프로젝트에 감사드립니다.
 - [ ] **두 번째 우선순위:** 학습된 streaming model 을 실행하기 위한 inference backend 를 추가한다.
+  - **Ongoing**: 추론 쪽 구현은 [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git) 에서 진행하고 있습니다.
 - [ ] training / inference context 에 hot words 와 hot translations 지원을 추가한다.
 
 ### LoRA 학습 시작점

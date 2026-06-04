@@ -98,8 +98,10 @@ Available now:
 
 TODO:
 - [x] **High priority**: test the thin LoRA trainer path with examples/train_lora.py on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly.
-- [ ] **High priority**: Complete full LoRA training with `google/gemma-4-E2B-it`. On going, currently we are creating large scale dataset. The dataset includes 8,000 audio and transcription, 24,000 translation strategy (multi-turn conversation trajectory) records, will be avaliable soon. This dataset is secondary processing of [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset). Thanks for this excellent multilingual audio dataset project.
-- [ ] **Second-highest priority:** add an inference backend for running the trained streaming model. On going, refer to [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git)
+- [ ] **High priority**: complete full LoRA training with `google/gemma-4-E2B-it`.
+  - **Ongoing**: we are preparing a large-scale dataset with 8,000 audio/transcription records and 24,000 translation-strategy records in multi-turn conversation trajectory format. The dataset will be available soon. It is built through secondary processing of [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset). We sincerely thank the Emilia-Dataset project for this excellent multilingual audio dataset.
+- [ ] **Second-highest priority:** add an inference backend for running the trained streaming model.
+  - **Ongoing**: related work is tracked in [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git).
 - [ ] Add hot words and hot translations support for training and inference contexts.
 
 ### LoRA training entry
