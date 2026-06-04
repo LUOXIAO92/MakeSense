@@ -92,8 +92,7 @@ class PureTextSegmentationProvider(BaseProvider):
         max_tokens: int = 1024,
         temperature: float = 0.5,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
         **kwargs,
     ) -> PipelineRecord:
         """
@@ -164,7 +163,7 @@ class PureTextSegmentationProvider(BaseProvider):
                 attempts_debug.append(attempt_debug)
                 try:
                     response = await self.llm.chat(
-                        retry_messages, max_tokens, temperature, top_p, top_k, enable_thinking
+                        retry_messages, max_tokens, temperature, top_p, extra_body
                     )
                     scratchpad_text, result_text = self._extract_scratchpad_and_result_blocks(response.content)
                     attempt_debug["scratchpad"] = scratchpad_text

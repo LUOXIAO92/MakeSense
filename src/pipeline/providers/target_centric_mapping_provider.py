@@ -98,8 +98,7 @@ class TargetCentricMappingProvider(BaseProvider):
         max_tokens: int = 1024,
         temperature: float = 0.5,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
         **kwargs,
     ) -> PipelineRecord:
         if target_language_codes is None:
@@ -158,7 +157,7 @@ class TargetCentricMappingProvider(BaseProvider):
                 attempts_debug.append(attempt_debug)
                 try:
                     response = await self.llm.chat(
-                        retry_messages, max_tokens, temperature, top_p, top_k, enable_thinking
+                        retry_messages, max_tokens, temperature, top_p, extra_body
                     )
                     scratchpad_text, result_text = self._extract_scratchpad_and_result_blocks(response.content)
                     attempt_debug["scratchpad"] = scratchpad_text
@@ -172,8 +171,7 @@ class TargetCentricMappingProvider(BaseProvider):
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                     )
                     if semantic_feedback:
                         raise TargetCentricMappingSemanticFeedbackError(semantic_feedback)
@@ -410,8 +408,7 @@ class TargetCentricMappingProvider(BaseProvider):
         max_tokens: int,
         temperature: float,
         top_p: float,
-        top_k: int,
-        enable_thinking: bool,
+        extra_body: dict | None,
     ) -> str | None:
         diagnostics = self._trigger_level2_mapping_diagnostics(mappings)
         if not diagnostics:
@@ -477,8 +474,7 @@ class TargetCentricMappingProvider(BaseProvider):
                         max_tokens,
                         temperature,
                         top_p,
-                        top_k,
-                        enable_thinking,
+                        extra_body,
                     )
                     semantic_error_feedback = extract_semantic_mapping_error_feedback_or_raise(
                         semantic_response.content

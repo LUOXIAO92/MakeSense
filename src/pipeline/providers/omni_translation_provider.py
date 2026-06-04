@@ -126,8 +126,7 @@ class OmniTranslationProvider(BaseProvider):
         max_tokens: int = 8000,
         temperature: float = 0.6,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
         **kwargs,
     ) -> PipelineRecord:
         """
@@ -169,7 +168,7 @@ class OmniTranslationProvider(BaseProvider):
                 ]
 
                 response = await self.llm.chat(
-                    messages, max_tokens, temperature, top_p, top_k, enable_thinking
+                    messages, max_tokens, temperature, top_p, extra_body
                 )
 
                 result_text, scratchpad = self._parse_llm_response(response.content)

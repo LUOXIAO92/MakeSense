@@ -98,8 +98,7 @@ class TimePressureSegmentationRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
         enable_visualization: bool = True,
     ) -> dict[str, int | str]:
         output_path = stage_output_path_from_input_cache(
@@ -141,8 +140,7 @@ class TimePressureSegmentationRunner:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                     )
                 )
                 active_tasks[task] = prerequisite_record
@@ -186,8 +184,7 @@ class TimePressureSegmentationRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
     ) -> list[PipelineRecord]:
         existing_output_by_uid = existing_output_by_uid or {}
         return await asyncio.gather(
@@ -198,8 +195,7 @@ class TimePressureSegmentationRunner:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
-                    top_k=top_k,
-                    enable_thinking=enable_thinking,
+                    extra_body=extra_body,
                 )
                 for prerequisite_record in prerequisite_records
             )
@@ -213,8 +209,7 @@ class TimePressureSegmentationRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
     ) -> PipelineRecord:
         if existing_record and self._is_finished_record(existing_record):
             return existing_record
@@ -229,8 +224,7 @@ class TimePressureSegmentationRunner:
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
-            top_k=top_k,
-            enable_thinking=enable_thinking,
+            extra_body=extra_body,
         )
 
     async def run_record(
@@ -239,8 +233,7 @@ class TimePressureSegmentationRunner:
         max_tokens: int = 1024,
         temperature: float = 0.5,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
     ) -> PipelineRecord:
         async with self._semaphore:
             try:
@@ -258,8 +251,7 @@ class TimePressureSegmentationRunner:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
-                    top_k=top_k,
-                    enable_thinking=enable_thinking,
+                    extra_body=extra_body,
                 )
                 latest_error = record.source.status.time_pressure_segmentation.errors[-1] if record.source.status.time_pressure_segmentation.errors else None
                 if latest_error:

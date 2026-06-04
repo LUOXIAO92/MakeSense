@@ -6,7 +6,11 @@ sys.path.append('src')
 import json
 from pathlib import Path
 from configs.config import Config
-from pipeline.exporters import record_to_transcription, record_to_translation
+from pipeline.exporters import (
+    record_to_dimensional_analysis,
+    record_to_transcription,
+    record_to_translation,
+)
 from pipeline.runners import load_pipeline_records_by_part_latest
 
 
@@ -62,6 +66,23 @@ def main() -> None:
                 transcriptions.append(transcription.model_dump())
         _write_jsonl(transcription_output_path, transcriptions)
         print(f"transcription: {input_cache_path.name} -> {transcription_output_path.name} ({len(transcriptions)})")
+
+        dimensional_analysis_output_path = (
+            OUTPUT_DATASET_ROOT
+            / "dimensional_analysis"
+            / source_language
+            / f"dimensional_analysis-{source_language}-{part_suffix}"
+        )
+        dimensional_analysis_rows = []
+        for record in source_records:
+            dimensional_analysis = record_to_dimensional_analysis(record)
+            if dimensional_analysis is not None:
+                dimensional_analysis_rows.append(dimensional_analysis)
+        _write_jsonl(dimensional_analysis_output_path, dimensional_analysis_rows)
+        print(
+            f"dimensional_analysis: {input_cache_path.name} -> "
+            f"{dimensional_analysis_output_path.name} ({len(dimensional_analysis_rows)})"
+        )
 
         for target_language in Config.language_codes:
             if target_language == source_language:

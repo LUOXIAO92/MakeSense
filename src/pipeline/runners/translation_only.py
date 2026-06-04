@@ -218,8 +218,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float,
-        top_k: int,
-        enable_thinking: bool,
+        extra_body: dict | None,
     ) -> tuple[object, str, dict[str, str], list[str]]:
         final_result: object = ""
         scratchpad = ""
@@ -236,8 +235,7 @@ class TranslationOnlyRunner:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
-                enable_thinking=enable_thinking,
+                extra_body=extra_body,
             )
             result_text, scratchpad = self._staged_translation_parser._parse_translation_response(response.content)
 
@@ -275,8 +273,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
         enable_visualization: bool = False,
         enable_audio_assisted_translation: bool = False,
         dataset_root: Path | None = None,
@@ -320,8 +317,7 @@ class TranslationOnlyRunner:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                         enable_audio_assisted_translation=enable_audio_assisted_translation,
                         dataset_root=dataset_root,
                     )
@@ -371,8 +367,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
         enable_audio_assisted_translation: bool = False,
         dataset_root: Path | None = None,
     ) -> tuple[PipelineRecord, str]:
@@ -414,8 +409,7 @@ class TranslationOnlyRunner:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
-                enable_thinking=enable_thinking,
+                extra_body=extra_body,
                 enable_audio_assisted_translation=enable_audio_assisted_translation,
                 dataset_root=dataset_root,
             )
@@ -427,8 +421,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
         enable_audio_assisted_translation: bool = False,
         dataset_root: Path | None = None,
     ) -> tuple[PipelineRecord, str]:
@@ -482,8 +475,7 @@ class TranslationOnlyRunner:
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
-            top_k=top_k,
-            enable_thinking=enable_thinking,
+            extra_body=extra_body,
         )
 
         record.target.shared.translation_analysis = scratchpad
@@ -531,8 +523,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
         enable_visualization: bool = False,
     ) -> dict[str, int | str]:
         output_path = cache_output_path(output_root, metadata_jsonl_path, "translation")
@@ -569,8 +560,7 @@ class TranslationOnlyRunner:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                     )
                 )
                 active_tasks[task] = meta
@@ -609,8 +599,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
     ) -> tuple[PipelineRecord, str]:
         async with self._semaphore:
             audio_path = dataset_root / "audio" / meta.language / meta.file_name
@@ -629,8 +618,7 @@ class TranslationOnlyRunner:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
-                enable_thinking=enable_thinking,
+                extra_body=extra_body,
             )
             latest_error = omni_translation_errors(record)[-1] if omni_translation_errors(record) else None
             if latest_error:
@@ -669,8 +657,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
         enable_visualization: bool = False,
     ) -> dict[str, int | str]:
         output_path = cache_output_path(output_root, transcription_jsonl_path, "translation")
@@ -718,8 +705,7 @@ class TranslationOnlyRunner:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                     )
                 )
                 active_tasks[task] = transcription
@@ -757,8 +743,7 @@ class TranslationOnlyRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
     ) -> tuple[PipelineRecord, str]:
         async with self._semaphore:
             author = self.llm.model_name
@@ -775,8 +760,7 @@ class TranslationOnlyRunner:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
-                enable_thinking=enable_thinking,
+                extra_body=extra_body,
             )
             metadata = MetaData(
                 uid=transcription.uid,

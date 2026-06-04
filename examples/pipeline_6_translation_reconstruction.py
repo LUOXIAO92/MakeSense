@@ -49,9 +49,15 @@ MAX_CURRENT_TASKS = 512
 MAX_TOKENS = 42000
 TEMPERATURE = 0.6
 TOP_P = 0.95
-TOP_K = 20
 MAX_RETRIES = 5
-ENABLE_THINKING = False
+# Provider-specific OpenAI-compatible request extensions.
+# vLLM / local OpenAI-compatible API example:
+# EXTRA_BODY = {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
+# OpenRouter reasoning example:
+# EXTRA_BODY = {"reasoning": {"effort": "none"}}
+# DeepSeek thinking example:
+# EXTRA_BODY = {"thinking": {"type": "disabled"}}
+EXTRA_BODY = None
 ENABLE_VISUALIZATION = True
 SHOW_TQDM_BAR = True
 RECONSTRUCTION_VALIDATOR_WINDOW_SIZE = 3
@@ -129,10 +135,9 @@ async def main() -> None:
     print("max_tokens:", MAX_TOKENS)
     print("temperature:", TEMPERATURE)
     print("top_p:", TOP_P)
-    print("top_k:", TOP_K)
     print("reconstruction_validator_model_name:", RECONSTRUCTION_VALIDATOR_MODEL_NAME)
     print("reconstruction_validator_window_size_pure_windows:", RECONSTRUCTION_VALIDATOR_WINDOW_SIZE)
-    print("enable_thinking:", ENABLE_THINKING)
+    print("extra_body:", EXTRA_BODY)
     print("enable_visualization:", ENABLE_VISUALIZATION)
     print("show_tqdm_bar:", SHOW_TQDM_BAR)
     print("max_current_tasks:", MAX_CURRENT_TASKS)
@@ -148,8 +153,7 @@ async def main() -> None:
             max_tokens=MAX_TOKENS,
             temperature=TEMPERATURE,
             top_p=TOP_P,
-            top_k=TOP_K,
-            enable_thinking=ENABLE_THINKING,
+            extra_body=EXTRA_BODY,
             enable_visualization=ENABLE_VISUALIZATION,
         )
         # print(f"cache: {input_cache_path.name} -> {summary['output_label']}")

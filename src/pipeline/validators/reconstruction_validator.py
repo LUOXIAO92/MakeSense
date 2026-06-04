@@ -1014,8 +1014,7 @@ class ReconstructionValidator:
         max_tokens: int = 1024,
         temperature: float = 0.3,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
     ) -> str | None:
         self.last_debug = {}
         if self.aligner_lock is None:
@@ -1109,8 +1108,7 @@ class ReconstructionValidator:
                         max_tokens,
                         temperature,
                         top_p,
-                        top_k,
-                        enable_thinking,
+                        extra_body,
                     )
                     semantic_scratchpad, semantic_result = extract_reconstruction_check_raw_blocks(response.content)
                     raw_validator_output = semantic_result or response.content

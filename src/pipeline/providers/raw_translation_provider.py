@@ -47,8 +47,7 @@ class RawTranslationProvider(BaseProvider):
         max_tokens: int = 4096,
         temperature: float = 0.5,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
         **kwargs,
     ) -> PipelineRecord:
         """
@@ -126,7 +125,7 @@ class RawTranslationProvider(BaseProvider):
             for n_retry in range(self.max_retries + 1):
                 try:
                     response = await self.llm.chat(
-                        messages, max_tokens, temperature, top_p, top_k, enable_thinking
+                        messages, max_tokens, temperature, top_p, extra_body
                     )
                     translation_text, scratchpad = self._parse_translation_response(
                         response.content

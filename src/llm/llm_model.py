@@ -160,25 +160,24 @@ class LLM:
             self, 
             messages,
             max_tokens: int  = 1024,
-            temperature: int = 0.5,
-            top_p: int = 0.95,
-            top_k: int = 40,
-            enable_thinking: bool = False
+            temperature: float = 0.5,
+            top_p: float = 0.95,
+            extra_body: dict | None = None,
         ):
 
         async with self._semaphore:
             try:
-                response = await self._client.chat.completions.create(
-                    messages=messages,
-                    model=self.model_name,
-                    max_tokens  = max_tokens,
-                    temperature = temperature,
-                    top_p       = top_p,
-                    extra_body  = {
-                        "top_k": top_k,
-                        "chat_template_kwargs": {"enable_thinking": enable_thinking}
-                    },
-                )
+                create_kwargs = {
+                    "messages": messages,
+                    "model": self.model_name,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                }
+                if extra_body is not None:
+                    create_kwargs["extra_body"] = extra_body
+
+                response = await self._client.chat.completions.create(**create_kwargs)
                 return ChatCompletions(
                     content=self._extract_response_content(response),
                     usage=self._extract_response_usage(response),

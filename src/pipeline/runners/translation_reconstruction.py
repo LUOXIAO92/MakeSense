@@ -235,8 +235,7 @@ class TranslationReconstructionRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
         enable_visualization: bool = False,
     ) -> dict[str, int | str]:
         output_path = reconstruction_output_path_from_input_cache(output_root, input_cache_base, input_cache_path)
@@ -293,8 +292,7 @@ class TranslationReconstructionRunner:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                     )
                 )
                 active_tasks[task] = unit
@@ -401,8 +399,7 @@ class TranslationReconstructionRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
     ) -> PipelineRecord:
         if existing_record and target_language_code and self._is_finished_target_branch(existing_record, target_language_code):
             return existing_record
@@ -432,8 +429,7 @@ class TranslationReconstructionRunner:
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
-            top_k=top_k,
-            enable_thinking=enable_thinking,
+            extra_body=extra_body,
         )
         return record
 
@@ -445,8 +441,7 @@ class TranslationReconstructionRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
     ) -> list[PipelineRecord]:
         existing_output_by_uid = existing_output_by_uid or {}
         return await asyncio.gather(
@@ -458,8 +453,7 @@ class TranslationReconstructionRunner:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
-                    top_k=top_k,
-                    enable_thinking=enable_thinking,
+                    extra_body=extra_body,
                 )
                 for prerequisite_record in prerequisite_records
             )
@@ -473,8 +467,7 @@ class TranslationReconstructionRunner:
         max_tokens: int,
         temperature: float,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool,
+        extra_body: dict | None = None,
     ) -> PipelineRecord:
         async with self._semaphore:
             system_prompt, user_prompt, target_language_codes = build_prompt_translation_reconstruction(
@@ -503,6 +496,5 @@ class TranslationReconstructionRunner:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
-                enable_thinking=enable_thinking,
+                extra_body=extra_body,
             )

@@ -70,7 +70,24 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 
 The active workflow is driven by the stage scripts in `examples/`. Each stage reads the previous stage cache, writes a new stage cache, and can be resumed from existing JSONL cache state.
 
-Before running, check the top-level configuration block in **each example script**. Common settings include dataset/cache roots, model names, target languages, `ENABLE_THINKING`, `TOP_P`, `TOP_K`, and `ENABLE_VISUALIZATION` where applicable.
+Before running, check the top-level configuration block in **each example script**. Common settings include dataset/cache roots, model names, target languages, `TOP_P`, provider-specific `EXTRA_BODY`, and `ENABLE_VISUALIZATION` where applicable.
+
+`EXTRA_BODY` is passed through to the OpenAI-compatible Chat Completions request and can carry provider-specific extensions. Parameters such as `top_k` and thinking/reasoning controls use different schemas across providers; the examples below show several common provider-specific shapes:
+
+```python
+# vLLM / local OpenAI-compatible API example:
+EXTRA_BODY = {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
+
+# OpenRouter reasoning example:
+EXTRA_BODY = {"reasoning": {"effort": "none"}}
+
+# DeepSeek thinking example:
+EXTRA_BODY = {"thinking": {"type": "disabled"}}
+```
+
+References:
+- OpenRouter reasoning tokens: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+- DeepSeek thinking mode: https://api-docs.deepseek.com/guides/thinking_mode
 
 ### Current availability
 
@@ -190,6 +207,11 @@ Pipeline 9 exports the final dataset layout:
 
 ```
 path/to/output/dir/
+├── dimensional_analysis/
+│   ├── EN/dimensional_analysis-EN-partXXXXXX.jsonl
+│   ├── JA/dimensional_analysis-JA-partXXXXXX.jsonl
+│   ├── KO/dimensional_analysis-KO-partXXXXXX.jsonl
+│   └── ZH/dimensional_analysis-ZH-partXXXXXX.jsonl
 ├── transcription/
 │   ├── EN/transcription-EN-partXXXXXX.jsonl
 │   ├── JA/transcription-JA-partXXXXXX.jsonl
@@ -201,6 +223,8 @@ path/to/output/dir/
     ├── EN/translation-EN_ZH-partXXXXXX.jsonl
     └── ...
 ```
+
+The `dimensional_analysis/` branch is an independent export of the whole-utterance `target.shared.translation_analysis` produced during translation. It is kept separate from the transcription and translation dataset schemas.
 
 ## Output format
 

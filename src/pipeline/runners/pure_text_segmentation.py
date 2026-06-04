@@ -170,8 +170,7 @@ class PureTextSegmentationRunner:
         max_tokens: int,
         temperature: float,
         top_p: float,
-        top_k: int,
-        enable_thinking: bool,
+        extra_body: dict | None,
         enable_visualization: bool = False,
     ) -> dict[str, int | str]:
         output_path = stage_output_path_from_input_cache(output_root, input_cache_base, input_cache_path, "pure_text_segmentation")
@@ -221,8 +220,7 @@ class PureTextSegmentationRunner:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                     )
                 )
                 active_tasks[task] = unit
@@ -295,8 +293,7 @@ class PureTextSegmentationRunner:
         max_tokens: int,
         temperature: float,
         top_p: float,
-        top_k: int,
-        enable_thinking: bool,
+        extra_body: dict | None,
     ) -> PipelineRecord:
         if existing_record and target_language_code and self._is_finished_target_branch(existing_record, target_language_code):
             return existing_record
@@ -322,8 +319,7 @@ class PureTextSegmentationRunner:
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
-            top_k=top_k,
-            enable_thinking=enable_thinking,
+            extra_body=extra_body,
         )
 
     async def run_record(
@@ -334,8 +330,7 @@ class PureTextSegmentationRunner:
         max_tokens: int,
         temperature: float,
         top_p: float,
-        top_k: int,
-        enable_thinking: bool,
+        extra_body: dict | None,
     ) -> PipelineRecord:
         async with self._semaphore:
             provider_kwargs = {
@@ -353,6 +348,5 @@ class PureTextSegmentationRunner:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                top_k=top_k,
-                enable_thinking=enable_thinking,
+                extra_body=extra_body,
             )

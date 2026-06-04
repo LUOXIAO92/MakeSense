@@ -70,7 +70,24 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 
 現在のワークフローは `examples/` 配下のステージスクリプトで実行します。各ステージは前段の cache を読み込み、新しいステージ cache を書き出します。既存の JSONL cache から続きを再開することもできます。
 
-実行前に、**各 example スクリプト冒頭の設定ブロック**を確認してください。よく使う項目には dataset/cache のパス、モデル名、対象言語、`ENABLE_THINKING`、`TOP_P`、`TOP_K`、必要に応じて `ENABLE_VISUALIZATION` などがあります。
+実行前に、**各 example スクリプト冒頭の設定ブロック**を確認してください。よく使う項目には dataset/cache のパス、モデル名、対象言語、`TOP_P`、provider 固有の `EXTRA_BODY`、必要に応じて `ENABLE_VISUALIZATION` などがあります。
+
+`EXTRA_BODY` は OpenAI-compatible Chat Completions request にそのまま渡される、provider 固有の拡張パラメータです。`top_k` や thinking/reasoning の制御は provider によって schema が異なるため、以下では代表的な provider-specific 設定例を示します。
+
+```python
+# vLLM / local OpenAI-compatible API の例:
+EXTRA_BODY = {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
+
+# OpenRouter reasoning の例:
+EXTRA_BODY = {"reasoning": {"effort": "none"}}
+
+# DeepSeek thinking の例:
+EXTRA_BODY = {"thinking": {"type": "disabled"}}
+```
+
+参考ドキュメント:
+- OpenRouter reasoning tokens: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+- DeepSeek thinking mode: https://api-docs.deepseek.com/guides/thinking_mode
 
 ### 現在使えるもの
 
@@ -189,6 +206,11 @@ Pipeline 9 は次の構成で最終データセットを export します。
 
 ```text
 path/to/output/dir/
+├── dimensional_analysis/
+│   ├── EN/dimensional_analysis-EN-partXXXXXX.jsonl
+│   ├── JA/dimensional_analysis-JA-partXXXXXX.jsonl
+│   ├── KO/dimensional_analysis-KO-partXXXXXX.jsonl
+│   └── ZH/dimensional_analysis-ZH-partXXXXXX.jsonl
 ├── transcription/
 │   ├── EN/transcription-EN-partXXXXXX.jsonl
 │   ├── JA/transcription-JA-partXXXXXX.jsonl
@@ -200,6 +222,8 @@ path/to/output/dir/
     ├── EN/translation-EN_ZH-partXXXXXX.jsonl
     └── ...
 ```
+
+`dimensional_analysis/` は、翻訳段階で生成された文全体レベルの `target.shared.translation_analysis` を独立して export する領域です。transcription / translation のデータセット schema とは分けて保存されます。
 
 ## 出力形式
 

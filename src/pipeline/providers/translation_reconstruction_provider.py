@@ -56,8 +56,7 @@ class TranslationReconstructionProvider(BaseProvider):
         max_tokens: int = 4096,
         temperature: float = 0.5,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
         **kwargs,
     ) -> PipelineRecord:
         transcript = record.source.artifacts.transcript
@@ -129,7 +128,7 @@ class TranslationReconstructionProvider(BaseProvider):
             attempts_debug.append(attempt_debug)
             try:
                 response = await self.llm.chat(
-                    messages, max_tokens, temperature, top_p, top_k, enable_thinking
+                    messages, max_tokens, temperature, top_p, extra_body
                 )
                 result_text, scratchpad = self._parse_reconstruction_response(response.content)
                 attempt_debug["scratchpad"] = scratchpad
@@ -148,8 +147,7 @@ class TranslationReconstructionProvider(BaseProvider):
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
-                        top_k=top_k,
-                        enable_thinking=enable_thinking,
+                        extra_body=extra_body,
                     )
                     if semantic_feedback:
                         raise TranslationReconstructionValidationError(semantic_feedback)
@@ -264,8 +262,7 @@ class TranslationReconstructionProvider(BaseProvider):
         max_tokens: int,
         temperature: float,
         top_p: float,
-        top_k: int,
-        enable_thinking: bool,
+        extra_body: dict | None,
     ) -> str | None:
         transcript = record.source.artifacts.transcript
         if transcript is None or not transcript.text:
@@ -282,8 +279,7 @@ class TranslationReconstructionProvider(BaseProvider):
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
-            top_k=top_k,
-            enable_thinking=enable_thinking,
+            extra_body=extra_body,
         )
 
     def _set_debug_translation_reconstruction(

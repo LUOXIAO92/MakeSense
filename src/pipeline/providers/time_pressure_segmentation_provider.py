@@ -89,8 +89,7 @@ class TimePressureSegmentationProvider(BaseProvider):
         max_tokens: int = 1024,
         temperature: float = 0.5,
         top_p: float = 0.95,
-        top_k: int = 40,
-        enable_thinking: bool = False,
+        extra_body: dict | None = None,
         **kwargs,
     ) -> PipelineRecord:
         """Run time-pressure segmentation on the transcript and alignment."""
@@ -155,7 +154,7 @@ class TimePressureSegmentationProvider(BaseProvider):
             attempts_debug.append(attempt_debug)
             try:
                 response = await self.llm.chat(
-                    messages, max_tokens, temperature, top_p, top_k, enable_thinking
+                    messages, max_tokens, temperature, top_p, extra_body
                 )
                 scratchpad_text, result_text = self._extract_scratchpad_and_result(response.content)
                 attempt_debug["scratchpad"] = scratchpad_text

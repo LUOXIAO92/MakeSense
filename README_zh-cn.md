@@ -70,7 +70,24 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 
 当前工作流由 `examples/` 下的阶段脚本驱动。每个阶段读取上一阶段的 cache，写入新的阶段 cache，并且可以基于已有 JSONL cache 继续运行。
 
-运行前请先检查**每个 example 脚本顶部的配置区块**。常见配置包括 dataset/cache 路径、模型名称、目标语言、`ENABLE_THINKING`、`TOP_P`、`TOP_K`，以及适用场景下的 `ENABLE_VISUALIZATION`。
+运行前请先检查**每个 example 脚本顶部的配置区块**。常见配置包括 dataset/cache 路径、模型名称、目标语言、`TOP_P`、供应商相关的 `EXTRA_BODY`，以及适用场景下的 `ENABLE_VISUALIZATION`。
+
+`EXTRA_BODY` 会原样透传给 OpenAI-compatible Chat Completions 请求，用于承载不同供应商的扩展参数。`top_k`、thinking/reasoning 开关等参数在不同服务中的 schema 不完全相同，因此这里作为 provider-specific 配置示例列出：
+
+```python
+# vLLM / local OpenAI-compatible API 示例：
+EXTRA_BODY = {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
+
+# OpenRouter reasoning 示例：
+EXTRA_BODY = {"reasoning": {"effort": "none"}}
+
+# DeepSeek thinking 示例：
+EXTRA_BODY = {"thinking": {"type": "disabled"}}
+```
+
+参考文档：
+- OpenRouter reasoning tokens: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+- DeepSeek thinking mode: https://api-docs.deepseek.com/guides/thinking_mode
 
 ### 当前可用功能
 
@@ -189,6 +206,11 @@ Pipeline 9 导出如下最终数据集结构：
 
 ```text
 path/to/output/dir/
+├── dimensional_analysis/
+│   ├── EN/dimensional_analysis-EN-partXXXXXX.jsonl
+│   ├── JA/dimensional_analysis-JA-partXXXXXX.jsonl
+│   ├── KO/dimensional_analysis-KO-partXXXXXX.jsonl
+│   └── ZH/dimensional_analysis-ZH-partXXXXXX.jsonl
 ├── transcription/
 │   ├── EN/transcription-EN-partXXXXXX.jsonl
 │   ├── JA/transcription-JA-partXXXXXX.jsonl
@@ -200,6 +222,8 @@ path/to/output/dir/
     ├── EN/translation-EN_ZH-partXXXXXX.jsonl
     └── ...
 ```
+
+`dimensional_analysis/` 是对翻译阶段生成的整句级 `target.shared.translation_analysis` 的独立导出。它与 transcription / translation 数据集 schema 分开保存。
 
 ## 输出格式
 

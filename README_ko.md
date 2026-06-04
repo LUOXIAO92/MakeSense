@@ -70,7 +70,24 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 
 현재 워크플로는 `examples/` 아래의 단계별 스크립트로 실행합니다. 각 단계는 이전 단계 cache 를 읽고 새 단계 cache 를 기록하며, 기존 JSONL cache 에서 이어서 실행할 수 있습니다.
 
-실행하기 전에 **각 example 스크립트 상단의 설정 블록**을 확인하세요. 자주 쓰는 항목에는 dataset/cache 경로, 모델 이름, 대상 언어, `ENABLE_THINKING`, `TOP_P`, `TOP_K`, 그리고 필요한 경우 `ENABLE_VISUALIZATION` 등이 있습니다.
+실행하기 전에 **각 example 스크립트 상단의 설정 블록**을 확인하세요. 자주 쓰는 항목에는 dataset/cache 경로, 모델 이름, 대상 언어, `TOP_P`, provider 별 `EXTRA_BODY`, 그리고 필요한 경우 `ENABLE_VISUALIZATION` 등이 있습니다.
+
+`EXTRA_BODY` 는 OpenAI-compatible Chat Completions 요청에 그대로 전달되는 provider 전용 확장 파라미터입니다. `top_k` 와 thinking/reasoning 제어는 provider 마다 schema 가 다를 수 있으므로, 아래에는 대표적인 provider-specific 설정 예시를 정리했습니다.
+
+```python
+# vLLM / local OpenAI-compatible API 예시:
+EXTRA_BODY = {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
+
+# OpenRouter reasoning 예시:
+EXTRA_BODY = {"reasoning": {"effort": "none"}}
+
+# DeepSeek thinking 예시:
+EXTRA_BODY = {"thinking": {"type": "disabled"}}
+```
+
+참고 문서:
+- OpenRouter reasoning tokens: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+- DeepSeek thinking mode: https://api-docs.deepseek.com/guides/thinking_mode
 
 ### 현재 제공되는 기능
 
@@ -189,6 +206,11 @@ Pipeline 9 는 최종 데이터셋을 다음 구조로 export 합니다.
 
 ```text
 path/to/output/dir/
+├── dimensional_analysis/
+│   ├── EN/dimensional_analysis-EN-partXXXXXX.jsonl
+│   ├── JA/dimensional_analysis-JA-partXXXXXX.jsonl
+│   ├── KO/dimensional_analysis-KO-partXXXXXX.jsonl
+│   └── ZH/dimensional_analysis-ZH-partXXXXXX.jsonl
 ├── transcription/
 │   ├── EN/transcription-EN-partXXXXXX.jsonl
 │   ├── JA/transcription-JA-partXXXXXX.jsonl
@@ -200,6 +222,8 @@ path/to/output/dir/
     ├── EN/translation-EN_ZH-partXXXXXX.jsonl
     └── ...
 ```
+
+`dimensional_analysis/` 는 번역 단계에서 생성된 전체 발화 단위의 `target.shared.translation_analysis` 를 독립적으로 export 하는 영역입니다. transcription / translation 데이터셋 schema 와는 분리되어 저장됩니다.
 
 ## 출력 형식
 
