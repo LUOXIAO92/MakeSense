@@ -17,6 +17,7 @@ from pipeline.prompts.utils import (
 )
 from pipeline.providers.omni_translation_provider import OmniTranslationProvider
 from pipeline.providers.raw_translation_provider import RawTranslationProvider
+from pipeline.providers.retry_error_rendering import is_system_or_provider_error
 from pipeline.schema import PipelineRecord
 from pipeline.schema import (
     RawTranslationArtifact,
@@ -329,7 +330,25 @@ class TranslationOnlyRunner:
             done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 prerequisite_record = active_tasks.pop(task)
-                record, visualized = await task
+                try:
+                    record, visualized = await task
+                except Exception as e:
+                    if not is_system_or_provider_error(e):
+                        raise
+                    record = self._build_failed_staged_translation_record(
+                        prerequisite_record,
+                        "provider_api_error",
+                        [str(e)],
+                    )
+                    visualized = visualization_translation_only(
+                        record.uid,
+                        record.target.shared.translation_analysis,
+                        {},
+                        asr_language_name=record.source.artifacts.transcript.language_name if record.source.artifacts.transcript else "",
+                        asr_text=record.source.artifacts.transcript.text if record.source.artifacts.transcript else "",
+                        status="translation_failed",
+                        errors=[f"provider_api_error: {e}"],
+                    )
                 existing_output_by_uid[prerequisite_record.uid] = record
                 await upsert_record(
                     output_path=output_path,
@@ -570,7 +589,24 @@ class TranslationOnlyRunner:
             done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 meta = active_tasks.pop(task)
-                record, visualized = await task
+                try:
+                    record, visualized = await task
+                except Exception as e:
+                    if not is_system_or_provider_error(e):
+                        raise
+                    record = PipelineRecord(uid=meta.uid, metadata=meta)
+                    record.source.status.asr = TaskStatus(
+                        status=StatusEnum.FAILED,
+                        errors=[f"provider_api_error: {e}"],
+                    )
+                    visualized = visualization_omni_translation_only(
+                        uid=meta.uid,
+                        scratchpad="",
+                        final_result={},
+                        asr_language_name="",
+                        asr_text="",
+                        errors=[f"provider_api_error: {e}"],
+                    )
                 existing_output_by_uid[meta.uid] = record
                 await upsert_record(
                     output_path=output_path,
@@ -715,7 +751,40 @@ class TranslationOnlyRunner:
             done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 transcription = active_tasks.pop(task)
-                record, visualized = await task
+                try:
+                    record, visualized = await task
+                except Exception as e:
+                    if not is_system_or_provider_error(e):
+                        raise
+                    metadata = MetaData(
+                        uid=transcription.uid,
+                        file_name="",
+                        duration=0.0,
+                        sample_rate=0.0,
+                        language=transcription.language,
+                    )
+                    record = PipelineRecord(uid=transcription.uid, metadata=metadata)
+                    record.source.artifacts.transcript = TranscriptArtifact(
+                        language_code=transcription.language,
+                        language_name=Config.lang_code2name.get(transcription.language, transcription.language),
+                        text=normalize_generated_text(transcription.text, transcription.language),
+                        author=getattr(transcription, "author", ""),
+                    )
+                    record.source.status.asr = TaskStatus(status=StatusEnum.FINISHED)
+                    record = self._build_failed_staged_translation_record(
+                        record,
+                        "provider_api_error",
+                        [str(e)],
+                    )
+                    visualized = visualization_translation_only(
+                        transcription.uid,
+                        "",
+                        {},
+                        asr_language_name=record.source.artifacts.transcript.language_name if record.source.artifacts.transcript else "",
+                        asr_text=record.source.artifacts.transcript.text if record.source.artifacts.transcript else "",
+                        status="translation_failed",
+                        errors=[f"provider_api_error: {e}"],
+                    )
                 existing_output_by_uid[transcription.uid] = record
                 await upsert_record(
                     output_path=output_path,

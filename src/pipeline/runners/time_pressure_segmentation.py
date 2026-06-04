@@ -5,6 +5,7 @@ from pathlib import Path
 
 from llm.llm_model import LLM
 from pipeline.providers.time_pressure_segmentation_provider import TimePressureSegmentationProvider
+from pipeline.providers.retry_error_rendering import is_system_or_provider_error
 from pipeline.schema import PipelineRecord, StatusEnum, TaskStatus
 from pipeline.runners.utils import (
     TqdmBar,
@@ -150,7 +151,16 @@ class TimePressureSegmentationRunner:
             done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 prerequisite_record = active_tasks.pop(task)
-                record = await task
+                try:
+                    record = await task
+                except Exception as e:
+                    if not is_system_or_provider_error(e):
+                        raise
+                    record = self._build_failed_record(
+                        prerequisite_record,
+                        "provider_api_error",
+                        [str(e)],
+                    )
                 existing_output_by_uid[prerequisite_record.uid] = record
                 status = self.record_status(record)
                 visualized = visualization_time_pressure_segmentation(record)
@@ -236,31 +246,19 @@ class TimePressureSegmentationRunner:
         extra_body: dict | None = None,
     ) -> PipelineRecord:
         async with self._semaphore:
-            try:
-                provider_kwargs = {
-                    "llm": self.llm,
-                    "system_prompt": "",
-                    "user_prompt_template": "",
-                    "max_retries": self.processor_max_retries,
-                }
-                if self.processor_name is not None:
-                    provider_kwargs["name"] = self.processor_name
-                provider = TimePressureSegmentationProvider(**provider_kwargs)
-                record = await provider.provide(
-                    record=record,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    extra_body=extra_body,
-                )
-                latest_error = record.source.status.time_pressure_segmentation.errors[-1] if record.source.status.time_pressure_segmentation.errors else None
-                if latest_error:
-                    self._tqdm_bar.update("Time pressure segmentation", n_finished=0, n_failed=1)
-                    self._tqdm_bar.write_latest_error(latest_error, uid=record.uid, error_name="segmentation_failed")
-                else:
-                    self._tqdm_bar.update("Time pressure segmentation", n_finished=1, n_failed=0)
-                return record
-            except Exception as e:
-                self._tqdm_bar.update("Time pressure segmentation", n_finished=0, n_failed=1)
-                self._tqdm_bar.write_latest_error(e, uid=record.uid)
-                raise
+            provider_kwargs = {
+                "llm": self.llm,
+                "system_prompt": "",
+                "user_prompt_template": "",
+                "max_retries": self.processor_max_retries,
+            }
+            if self.processor_name is not None:
+                provider_kwargs["name"] = self.processor_name
+            provider = TimePressureSegmentationProvider(**provider_kwargs)
+            return await provider.provide(
+                record=record,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                extra_body=extra_body,
+            )

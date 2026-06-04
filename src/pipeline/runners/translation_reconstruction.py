@@ -10,6 +10,7 @@ from pipeline.prompts.utils import build_prompt_translation_reconstruction
 from pipeline.providers.translation_reconstruction_provider import (
     TranslationReconstructionProvider,
 )
+from pipeline.providers.retry_error_rendering import is_system_or_provider_error
 from pipeline.validators.reconstruction_validator import ReconstructionValidator, TransAlignProjectTokenAligner
 from pipeline.schema import (
     PipelineRecord,
@@ -302,7 +303,17 @@ class TranslationReconstructionRunner:
             done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 prerequisite_record, target_language_code = active_tasks.pop(task)
-                record = await task
+                try:
+                    record = await task
+                except Exception as e:
+                    if not is_system_or_provider_error(e):
+                        raise
+                    record = self._build_failed_record(
+                        prerequisite_record,
+                        "provider_api_error",
+                        [str(e)],
+                        target_language_codes=[target_language_code],
+                    )
                 existing_output_by_uid[prerequisite_record.uid] = record
                 status = self.branch_status(record, target_language_code)
                 if status == "finished":
