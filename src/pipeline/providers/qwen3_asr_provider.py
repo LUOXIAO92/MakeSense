@@ -82,15 +82,18 @@ class Qwen3ASR:
             - a list of transcription strings
         """
 
-        if language is not None:
-            if language.capitalize() not in Config.language_names:
-                lang = None 
-            if language.upper() in Config.language_codes:
-                lang = Config.lang_name2code.get(language.upper())
+        if language is None:
+            lang = None
+        else:
+            normalized_name = language.capitalize()
+            normalized_code = language.upper()
+
+            if normalized_name in Config.language_names:
+                lang = normalized_name
+            elif normalized_code in Config.language_codes:
+                lang = Config.lang_code2name[normalized_code]
             else:
                 lang = None
-        else:
-            lang = language
         
         results = self.asr_model.transcribe(audio, language = lang, return_time_stamps = False)
 
