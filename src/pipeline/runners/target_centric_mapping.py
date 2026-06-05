@@ -83,6 +83,7 @@ class TargetCentricMappingRunner:
             )
             validate_mapping_downstream_readiness_or_raise(
                 mappings=target.artifacts.tgt_src_mapping.mappings,
+                source_duration=record.metadata.duration,
                 source_language_code=record.metadata.language,
                 alignment_tokens=record.source.artifacts.alignment.tokens,
                 alignment_word_groups=record.source.artifacts.alignment.words,
@@ -116,6 +117,8 @@ class TargetCentricMappingRunner:
         record = prerequisite_record.model_copy(deep=True)
         target_codes = target_language_codes or self._prerequisite_target_language_codes(record)
         for code in target_codes:
+            record.target.languages[code].artifacts.tgt_src_mapping.mappings = []
+            record.target.languages[code].artifacts.tgt_src_mapping.author = ""
             record.target.languages[code].status.tgt_src_mapping = TaskStatus(
                 status=StatusEnum.FAILED,
                 errors=[f"{stage_label}: {error}" for error in errors],
@@ -266,6 +269,17 @@ class TargetCentricMappingRunner:
                     )
                 existing_output_by_uid[prerequisite_record.uid] = record
                 status = self.branch_status(record, target_language_code)
+                if status == "finished" and not self._is_finished_target_branch(record, target_language_code):
+                    branch = record.target.languages[target_language_code]
+                    branch.artifacts.tgt_src_mapping.mappings = []
+                    branch.artifacts.tgt_src_mapping.author = ""
+                    branch.status.tgt_src_mapping = TaskStatus(
+                        status=StatusEnum.FAILED,
+                        errors=[
+                            "target_centric_mapping: branch status was FINISHED, but downstream readiness validation failed before successful visualization"
+                        ],
+                    )
+                    status = self.branch_status(record, target_language_code)
                 if status == "finished":
                     visualized = visualization_target_centric_mapping(record, target_language_code)
                 else:

@@ -192,6 +192,8 @@ class TargetCentricMappingProvider(BaseProvider):
                     branch.status.tgt_src_mapping = TaskStatus(status=StatusEnum.FINISHED)
                     break
                 except TargetCentricMappingDependencyError as e:
+                    branch.artifacts.tgt_src_mapping.mappings = []
+                    branch.artifacts.tgt_src_mapping.author = ""
                     attempt_debug["status"] = (
                         "failed_after_response"
                         if attempt_debug.get("scratchpad") or attempt_debug.get("result")
@@ -237,6 +239,8 @@ class TargetCentricMappingProvider(BaseProvider):
                     exceptions.append(e)
                     if n_retry == self.max_retries:
                         raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
+                        branch.artifacts.tgt_src_mapping.mappings = []
+                        branch.artifacts.tgt_src_mapping.author = ""
                         record.set_debug_target_centric_mapping(
                             tgt_lang_code,
                             scratchpad=scratchpad_text,
@@ -518,6 +522,7 @@ class TargetCentricMappingProvider(BaseProvider):
         )
         validate_mapping_downstream_readiness_or_raise(
             mappings=mappings,
+            source_duration=record.metadata.duration,
             source_language_code=record.metadata.language,
             alignment_tokens=record.source.artifacts.alignment.tokens,
             alignment_word_groups=record.source.artifacts.alignment.words,

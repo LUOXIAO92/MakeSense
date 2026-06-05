@@ -3,7 +3,7 @@ import json
 from typing import Mapping as TypingMapping, Sequence
 
 from core.schema import Mapping, Word
-from core.utils import apply_mapping_groups
+from core.utils import apply_mapping_groups, build_transcription_chunks
 
 
 SEMANTIC_CHECK_MAX_RETRIES = 2
@@ -741,9 +741,89 @@ def _mapped_target_ids_by_source_token(mappings: Sequence[Mapping]) -> dict[int,
     return {source_token_id: sorted(set(target_ids)) for source_token_id, target_ids in usage.items()}
 
 
+def _validate_source_sense_units_assign_to_release_windows_or_raise(
+    *,
+    source_duration: float,
+    words: Sequence[Word],
+    source_sense_unit_groups: Sequence[Sequence[int]],
+    eps: float = 1e-6,
+) -> None:
+    chunks = build_transcription_chunks(duration=source_duration, words=list(words))
+    if not chunks:
+        raise TargetCentricMappingDependencyError(
+            "Upstream Dependency Error: source release-window construction produced no windows.\n\n"
+            f"metadata.duration/source_duration: {source_duration}\n"
+            f"reconstructed source words: {len(words)}\n\n"
+            "This is an upstream timing/source segmentation dependency problem, not a target mapping JSON problem."
+        )
+
+    assigned_group_count = 0
+    word_release_window_indices: list[int | None] = [None] * len(words)
+    for chunk_idx, chunk in enumerate(chunks):
+        is_final_chunk = chunk_idx == len(chunks) - 1
+        while assigned_group_count < len(source_sense_unit_groups):
+            group = list(source_sense_unit_groups[assigned_group_count])
+            last_word_idx = group[-1]
+            seg_end = words[last_word_idx].end
+            last_word_is_in_chunk = any(word is words[last_word_idx] for word in chunk.words)
+            last_token_final_overrun = is_final_chunk and last_word_idx == len(words) - 1 and last_word_is_in_chunk
+            if seg_end < chunk.end + eps or last_token_final_overrun:
+                for word_id in group:
+                    word_release_window_indices[word_id] = chunk_idx
+                assigned_group_count += 1
+            else:
+                break
+
+    if assigned_group_count == len(source_sense_unit_groups) and all(
+        release_window is not None for release_window in word_release_window_indices
+    ):
+        return
+
+    unassigned_group_lines: list[str] = []
+    for group_id in range(assigned_group_count, len(source_sense_unit_groups)):
+        group = list(source_sense_unit_groups[group_id])
+        last_word_idx = group[-1]
+        last_word = words[last_word_idx]
+        unassigned_group_lines.append(
+            f'- source_senseunit[{group_id}]: word ids {group}; '
+            f'last {_format_word(last_word_idx, last_word)}'
+        )
+
+    uncovered_word_lines = [
+        f"- {_format_word(word_id, words[word_id])}"
+        for word_id, release_window in enumerate(word_release_window_indices)
+        if release_window is None
+    ]
+    chunk_lines = [
+        f"- window[{chunk_idx}]: start={chunk.start:.2f} end={chunk.end:.2f} words={len(chunk.words)}"
+        for chunk_idx, chunk in enumerate(chunks)
+    ]
+    message_lines = [
+        "Upstream Dependency Error: source sense units cannot all be assigned to release windows.",
+        "",
+        "Why this matters:",
+        "Target-centric mapping can only be accepted when source tokens project through source words and source sense units into streaming release windows. If a source sense unit has no release window, mapped target emission timing is undefined.",
+        "",
+        f"metadata.duration/source_duration: {source_duration}",
+        f"constructed release windows: {len(chunks)}",
+        f"assigned source sense units: {assigned_group_count}/{len(source_sense_unit_groups)}",
+        "",
+        "This is an upstream timing/source segmentation dependency problem, not a target mapping JSON problem. Do not invent source_token_ids to bypass it.",
+        "",
+        "Constructed release windows:",
+        *chunk_lines,
+    ]
+    if unassigned_group_lines:
+        message_lines.extend(["", "Unassigned source sense-unit groups:", *unassigned_group_lines])
+    if uncovered_word_lines:
+        message_lines.extend(["", "Source words without release windows:", *uncovered_word_lines])
+    raise TargetCentricMappingDependencyError("\n".join(message_lines))
+
+
 def validate_mapping_downstream_readiness_or_raise(
     *,
     mappings: Sequence[Mapping],
+    source_duration: float,
     source_language_code: str,
     alignment_tokens: Sequence[Word],
     alignment_word_groups: Sequence[Sequence[int]],
@@ -809,6 +889,11 @@ def validate_mapping_downstream_readiness_or_raise(
         )
         empty_token_groups = [token_id for token_id, word_group in enumerate(source_token_word_groups) if not word_group]
         if not empty_token_groups:
+            _validate_source_sense_units_assign_to_release_windows_or_raise(
+                source_duration=source_duration,
+                words=words,
+                source_sense_unit_groups=source_sense_unit_groups,
+            )
             return
     else:
         source_text_tokens = [token.word for token in alignment_tokens]
