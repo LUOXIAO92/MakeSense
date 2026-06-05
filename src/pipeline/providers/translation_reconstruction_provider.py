@@ -307,28 +307,38 @@ class TranslationReconstructionProvider(BaseProvider):
 
     def _parse_reconstruction_response(self, response_text: str) -> tuple[str, str]:
         text = response_text
-        sp_open = re.search(r"<scratchpad\s*>", text, re.IGNORECASE)
-        sp_close = re.search(r"</scratchpad\s*>", text, re.IGNORECASE)
-        rs_open = re.search(r"<result\s*>", text, re.IGNORECASE)
-        rs_close = re.search(r"</result\s*>", text, re.IGNORECASE)
+        sp_open_matches = list(re.finditer(r"<scratchpad\s*>", text, re.IGNORECASE))
+        sp_close_matches = list(re.finditer(r"</scratchpad\s*>", text, re.IGNORECASE))
+        rs_open_matches = list(re.finditer(r"<result\s*>", text, re.IGNORECASE))
+        rs_close_matches = list(re.finditer(r"</result\s*>", text, re.IGNORECASE))
 
-        scratchpad = ""
-        result = ""
+        if len(sp_open_matches) != 1 or len(sp_close_matches) != 1:
+            raise TranslationReconstructionValidationError(
+                "Output Format Error: reconstruction response must contain exactly one complete <scratchpad>...</scratchpad> block"
+            )
+        if len(rs_open_matches) != 1 or len(rs_close_matches) != 1:
+            raise TranslationReconstructionValidationError(
+                "Output Format Error: reconstruction response must contain exactly one complete <result>...</result> block"
+            )
 
-        if sp_open and sp_close and sp_close.start() >= sp_open.end():
-            scratchpad = text[sp_open.end() : sp_close.start()].strip()
-        elif sp_open and rs_open and rs_open.start() >= sp_open.end():
-            scratchpad = text[sp_open.end() : rs_open.start()].strip()
+        sp_open = sp_open_matches[0]
+        sp_close = sp_close_matches[0]
+        rs_open = rs_open_matches[0]
+        rs_close = rs_close_matches[0]
 
-        if rs_open and rs_close and rs_close.start() >= rs_open.end():
-            result = text[rs_open.end() : rs_close.start()].strip()
-        elif rs_open:
-            result = text[rs_open.end() :].strip()
-        elif sp_close:
-            result = text[sp_close.end() :].strip()
-        elif not sp_open and not rs_open:
-            result = text.strip()
+        if not (sp_open.end() <= sp_close.start() <= rs_open.start() and rs_open.end() <= rs_close.start()):
+            raise TranslationReconstructionValidationError(
+                "Output Format Error: reconstruction response blocks must appear as <scratchpad>...</scratchpad><result>...</result>"
+            )
 
+        scratchpad = text[sp_open.end() : sp_close.start()].strip()
+        result = text[rs_open.end() : rs_close.start()].strip()
+        if not scratchpad:
+            raise TranslationReconstructionValidationError(
+                "Translation reconstruction validation failed:\n"
+                "- empty scratchpad block\n"
+                "\nReconfirm the OUTPUT FORMAT and OUTPUT RULES!\n"
+            )
         return result, scratchpad
 
     def _parse_reconstruction_result(
@@ -476,7 +486,20 @@ def parse_single_translation_reconstruction_text_or_raise(result_text: str) -> s
             "- empty reconstruction output for single-language reconstruction\n"
             "\nReconfirm the OUTPUT FORMAT and OUTPUT RULES!\n"
         )
-    return result_text.strip()
+    value = result_text.strip()
+    if re.search(r"</?(?:scratchpad|result)\s*>", value, re.IGNORECASE):
+        raise TranslationReconstructionValidationError(
+            "Translation reconstruction validation failed:\n"
+            "- reconstruction output contains leaked scratchpad/result block tags\n"
+            "\nReconfirm the OUTPUT FORMAT and OUTPUT RULES!\n"
+        )
+    if "```" in value:
+        raise TranslationReconstructionValidationError(
+            "Translation reconstruction validation failed:\n"
+            "- reconstruction output contains leaked markdown/code-fence markup\n"
+            "\nReconfirm the OUTPUT FORMAT and OUTPUT RULES!\n"
+        )
+    return value
 
 
 ValidateExceptions = (TranslationReconstructionValidationError,)

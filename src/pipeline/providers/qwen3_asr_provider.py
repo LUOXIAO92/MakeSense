@@ -94,6 +94,7 @@ class Qwen3ASR:
                 lang = Config.lang_code2name[normalized_code]
             else:
                 lang = None
+
         
         results = self.asr_model.transcribe(audio, language = lang, return_time_stamps = False)
 
