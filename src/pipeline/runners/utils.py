@@ -199,6 +199,103 @@ class TqdmBar:
             self.tqdm_bar = None
 
 
+def aggregate_shard_summaries(summaries: list[dict[str, int | str]]) -> dict[str, int]:
+    """Aggregate numeric shard summary fields for end-of-run printing."""
+    aggregated: dict[str, int] = {"shards": len(summaries)}
+    for summary in summaries:
+        for key, value in summary.items():
+            if isinstance(value, int):
+                aggregated[key] = aggregated.get(key, 0) + value
+    return aggregated
+
+
+def _failed_units_for_stage(record: PipelineRecord, stage: str) -> list[dict[str, str]]:
+    """Return failed units as minimal JSON-serializable uid/side/lang objects."""
+    failed_units: list[dict[str, str]] = []
+
+    if stage == "staged_translation":
+        for code, branch in sorted(record.target.languages.items()):
+            if branch.status.raw_translation.status == StatusEnum.FAILED:
+                failed_units.append({"uid": record.uid, "side": "target", "lang": code})
+        return failed_units
+
+    if stage == "omni_translation":
+        if record.source.status.asr.status == StatusEnum.FAILED:
+            failed_units.append({"uid": record.uid, "side": "source", "lang": record.metadata.language})
+        for code, branch in sorted(record.target.languages.items()):
+            if branch.status.raw_translation.status == StatusEnum.FAILED:
+                failed_units.append({"uid": record.uid, "side": "target", "lang": code})
+        return failed_units
+
+    if stage == "time_pressure_segmentation":
+        if record.source.status.time_pressure_segmentation.status == StatusEnum.FAILED:
+            failed_units.append({"uid": record.uid, "side": "source", "lang": record.metadata.language})
+        return failed_units
+
+    if stage == "translation_reconstruction":
+        for code, branch in sorted(record.target.languages.items()):
+            if branch.status.reconstruction.status == StatusEnum.FAILED:
+                failed_units.append({"uid": record.uid, "side": "target", "lang": code})
+        return failed_units
+
+    if stage == "pure_text_segmentation":
+        for code, branch in sorted(record.target.languages.items()):
+            if branch.status.pure_text_segmentation.status == StatusEnum.FAILED:
+                failed_units.append({"uid": record.uid, "side": "target", "lang": code})
+        return failed_units
+
+    if stage == "target_centric_mapping":
+        for code, branch in sorted(record.target.languages.items()):
+            if branch.status.tgt_src_mapping.status == StatusEnum.FAILED:
+                failed_units.append({"uid": record.uid, "side": "target", "lang": code})
+        return failed_units
+
+    raise ValueError(f"Unsupported LLM pipeline summary stage: {stage}")
+
+
+def collect_failed_units_from_output_paths(
+    *,
+    output_paths: list[Path],
+    stage: str,
+) -> list[dict[str, str]]:
+    """Collect unique failed uid/side/lang units from final output cache shards."""
+    seen: set[tuple[str, str, str]] = set()
+    failed_units: list[dict[str, str]] = []
+    for output_path in output_paths:
+        for record in load_pipeline_records_by_uid(output_path).values():
+            for unit in _failed_units_for_stage(record, stage):
+                key = (unit["uid"], unit["side"], unit["lang"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                failed_units.append(unit)
+    failed_units.sort(key=lambda item: (item["uid"], item["side"], item["lang"]))
+    return failed_units
+
+
+def print_llm_pipeline_summary(
+    *,
+    title: str,
+    summaries: list[dict[str, int | str]],
+    output_paths: list[Path],
+    stage: str,
+) -> None:
+    """Print an end-of-run summary and JSONL failed uid/side/lang units."""
+    print(f"=== {title} summary ===")
+    for key, value in sorted(aggregate_shard_summaries(summaries).items()):
+        print(f"{key}: {value}")
+    print()
+
+    failed_units = collect_failed_units_from_output_paths(output_paths=output_paths, stage=stage)
+    if not failed_units:
+        print("failed_items_jsonl: 0")
+        return
+
+    print("failed_items_jsonl:")
+    for unit in failed_units:
+        print(json.dumps(unit, ensure_ascii=False, separators=(",", ":")))
+
+
 def load_metadata_by_part(dataset_root: Path) -> list[tuple[Path, list[MetaData]]]:
     items: list[tuple[Path, list[MetaData]]] = []
     for jsonl_path in sorted((dataset_root / "metadata").glob("*/*.jsonl")):
@@ -1036,7 +1133,14 @@ def visualization_target_centric_mapping(record: PipelineRecord, target_language
     source_language_name = _readable_language_name(source_language_code)
     target_language_name = _readable_language_name(target_language_code)
     target_tokens = list(target.artifacts.pure_text_segmentation.tokens) if target else []
-    source_tokens = {idx: token.word for idx, token in enumerate(alignment.tokens)} if alignment else {}
+    source_tokens = {}
+    if alignment and alignment.tokens and alignment.words:
+        source_words = apply_mapping_groups(
+            alignment.tokens,
+            alignment.words,
+            language=record.metadata.language,
+        )
+        source_tokens = {idx: word.word for idx, word in enumerate(source_words)}
     target_units = group_tokens_by_sense_units(
         language=target_language_code,
         tokens=target_tokens,
@@ -1132,7 +1236,14 @@ def failed_visualization_target_centric_mapping(record: PipelineRecord, target_l
     source_language_name = _readable_language_name(source_language_code)
     target_language_name = _readable_language_name(target_language_code)
     target_tokens = list(target.artifacts.pure_text_segmentation.tokens) if target else []
-    source_tokens = {idx: token.word for idx, token in enumerate(alignment.tokens)} if alignment else {}
+    source_tokens = {}
+    if alignment and alignment.tokens and alignment.words:
+        source_words = apply_mapping_groups(
+            alignment.tokens,
+            alignment.words,
+            language=record.metadata.language,
+        )
+        source_tokens = {idx: word.word for idx, word in enumerate(source_words)}
     target_units = group_tokens_by_sense_units(
         language=target_language_code,
         tokens=target_tokens,

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from llm.llm_model import LLM
+from core.utils import apply_mapping_groups
 from pipeline.providers.target_centric_mapping_provider import TargetCentricMappingProvider
 from pipeline.providers.retry_error_rendering import is_system_or_provider_error
 from pipeline.runners.utils import (
@@ -76,10 +77,15 @@ class TargetCentricMappingRunner:
         if target.status.tgt_src_mapping.status != StatusEnum.FINISHED:
             return False
         try:
+            source_words = apply_mapping_groups(
+                record.source.artifacts.alignment.tokens,
+                record.source.artifacts.alignment.words,
+                language=record.metadata.language,
+            )
             validate_mapping_result_or_raise(
                 mappings=target.artifacts.tgt_src_mapping.mappings,
                 expected_target_ids=list(range(len(target.artifacts.pure_text_segmentation.sense_units.groups))),
-                source_token_count=len(record.source.artifacts.alignment.tokens),
+                source_token_count=len(source_words),
             )
             validate_mapping_downstream_readiness_or_raise(
                 mappings=target.artifacts.tgt_src_mapping.mappings,

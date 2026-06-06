@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 
 from configs.config import Config
 from core.schema import Mapping
-from core.utils import group_tokens_by_sense_units
+from core.utils import apply_mapping_groups, group_tokens_by_sense_units
 from llm.llm_model import LLM
 from pipeline.prompts.target_centric_mapping import (
     SYSTEM_INSTRUCTION_SENSE_UNIT_MAPPING,
@@ -310,9 +310,14 @@ class TargetCentricMappingProvider(BaseProvider):
 
     def _get_source_token_texts(self, record: PipelineRecord) -> dict[int, str]:
         alignment = record.source.artifacts.alignment
-        if alignment is None or not alignment.tokens:
+        if alignment is None or not alignment.tokens or not alignment.words:
             return {}
-        return {idx: token.word for idx, token in enumerate(alignment.tokens)}
+        source_words = apply_mapping_groups(
+            alignment.tokens,
+            alignment.words,
+            language=record.metadata.language,
+        )
+        return {idx: word.word for idx, word in enumerate(source_words)}
 
     def _extract_scratchpad_and_result_blocks(self, response_text: str) -> tuple[str, str]:
         text = response_text
@@ -514,7 +519,7 @@ class TargetCentricMappingProvider(BaseProvider):
     ) -> None:
         branch = record.target.languages[target_language_code]
         target_groups = branch.artifacts.pure_text_segmentation.sense_units.groups
-        source_tokens = record.source.artifacts.alignment.tokens
+        source_tokens = self._get_source_token_texts(record)
         validate_mapping_result_or_raise(
             mappings=mappings,
             expected_target_ids=list(range(len(target_groups))),

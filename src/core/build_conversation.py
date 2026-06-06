@@ -106,16 +106,6 @@ def build_translation_blocks(
     if not chunks:
         raise ValueError("Cannot build translation blocks without source windows")
 
-    source_token_count = len(transcription.tokens)
-    source_token_word_groups: list[list[int]] = [[] for _ in range(source_token_count)]
-    for word_id, token_group in enumerate(transcription.words):
-        for token_id in token_group:
-            if token_id < 0 or token_id >= source_token_count:
-                raise ValueError(
-                    f"source word {word_id} maps to source token out of range: {token_id}; "
-                    f"available source tokens: {source_token_count}"
-                )
-            source_token_word_groups[token_id].append(word_id)
     source_groups = transcription.sense_units.groups
     word_release_window_indices: list[int | None] = [None] * len(words)
     group_idx = 0
@@ -156,23 +146,9 @@ def build_translation_blocks(
             raise ValueError(f"source word {word_id} was not covered by any source sense unit group")
 
     source_token_ready_windows: list[int] = []
-    for token_idx, word_group in enumerate(source_token_word_groups):
-        if not word_group:
-            raise ValueError(f"source token {token_idx} does not align to any source word")
-        release_window_idx = -1
-        for word_id in word_group:
-            if word_id < 0 or word_id >= len(word_release_window_indices):
-                raise ValueError(
-                    f"source token {token_idx} maps to source word out of range: {word_id}; "
-                    f"available source words: {len(words)}"
-                )
-            word_release_window = word_release_window_indices[word_id]
-            if word_release_window is None:
-                raise ValueError(
-                    f"source token {token_idx} maps to source word {word_id}, "
-                    "but that word has no release window"
-                )
-            release_window_idx = max(release_window_idx, word_release_window)
+    for word_id, release_window_idx in enumerate(word_release_window_indices):
+        if release_window_idx is None:
+            raise ValueError(f"source word {word_id} has no release window")
         source_token_ready_windows.append(release_window_idx)
 
     target_groups = translation.sense_units.groups
@@ -204,8 +180,8 @@ def build_translation_blocks(
         for source_token_id in source_token_ids:
             if source_token_id < 0 or source_token_id >= len(source_token_ready_windows):
                 raise ValueError(
-                    f"source_token_id out of range: {source_token_id}; "
-                    f"available source tokens: {len(source_token_ready_windows)}"
+                    f"source_token_id/source word id out of range: {source_token_id}; "
+                    f"available source words: {len(source_token_ready_windows)}"
                 )
             ready_window_idx = max(ready_window_idx, source_token_ready_windows[source_token_id])
 
