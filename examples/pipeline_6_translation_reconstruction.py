@@ -20,7 +20,7 @@ from llm.llm_model import LLM
 from pipeline.runners import (
     TranslationReconstructionRunner,
 )
-from pipeline.runners.utils import load_pipeline_records_by_uid, reconstruction_output_path_from_input_cache
+from pipeline.runners.utils import load_pipeline_records_by_uid, print_llm_pipeline_summary, reconstruction_output_path_from_input_cache
 from pipeline.schema import PipelineRecord
 
 DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
@@ -32,8 +32,8 @@ INPUT_CACHE_BASE = CACHE_ROOT / "pipeline_5_asr_segmentation_deepseek-v4-flash"
 
 BASE_URL = os.environ.get("OPEN_ROUTER_BASE_URL")
 API_KEY = os.environ.get("OPEN_ROUTER_API_KEY")
-MODEL_NAME = "deepseek/deepseek-v4-flash"
-# MODEL_NAME = "google/gemini-3.1-flash-lite"
+# MODEL_NAME = "deepseek/deepseek-v4-flash"
+MODEL_NAME = "google/gemini-3.1-flash-lite"
 
 RECONSTRUCTION_VALIDATOR_BASE_URL = BASE_URL
 RECONSTRUCTION_VALIDATOR_API_KEY  = API_KEY
@@ -46,7 +46,7 @@ RECONSTRUCTION_VALIDATOR_MODEL_NAME = "deepseek/deepseek-v4-flash"
 
 DEFAULT_CONCURRENCY = 128
 MAX_CURRENT_TASKS = 512
-MAX_TOKENS = 42000
+MAX_TOKENS = 8192
 TEMPERATURE = 0.6
 TOP_P = 0.95
 MAX_RETRIES = 5
@@ -143,7 +143,10 @@ async def main() -> None:
     print("max_current_tasks:", MAX_CURRENT_TASKS)
     print()
 
+    summaries = []
+    output_paths = []
     for input_cache_path, prerequisite_records in prerequisite_cache_parts:
+        output_path = reconstruction_output_path_from_input_cache(OUTPUT_BASE, INPUT_CACHE_BASE, input_cache_path)
         summary = await reconstruction_runner.run_cache_shard(
             input_cache_base=INPUT_CACHE_BASE,
             input_cache_path=input_cache_path,
@@ -161,8 +164,16 @@ async def main() -> None:
         # print("pending:", summary["pending"])
         # print("shard_summary:", summary)
         # print()
+        summaries.append(summary)
+        output_paths.append(output_path)
 
     reconstruction_runner.close_progress()
+    print_llm_pipeline_summary(
+        title="Pipeline 6: Translation reconstruction",
+        summaries=summaries,
+        output_paths=output_paths,
+        stage="translation_reconstruction",
+    )
 
 
 if __name__ == "__main__":

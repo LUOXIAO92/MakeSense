@@ -18,7 +18,7 @@ from pipeline.runners import (
     PureTextSegmentationRunner,
     load_pipeline_records_by_part_latest,
 )
-from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
+from pipeline.runners.utils import load_pipeline_records_by_uid, print_llm_pipeline_summary, stage_output_path_from_input_cache
 
 DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
 
@@ -29,15 +29,15 @@ OUTPUT_BASE      = CACHE_ROOT / "pipeline_7_pure_text_segmentation_deepseek-v4-f
 
 BASE_URL = os.environ.get("OPEN_ROUTER_BASE_URL")
 API_KEY = os.environ.get("OPEN_ROUTER_API_KEY")
-MODEL_NAME = "deepseek/deepseek-v4-flash"
-# MODEL_NAME = "google/gemini-3.1-flash-lite"
+# MODEL_NAME = "deepseek/deepseek-v4-flash"
+MODEL_NAME = "google/gemini-3.1-flash-lite"
 
 # BASE_URL="http://127.0.0.1:12345/v1"
 # MODEL_NAME="qwen3.6-27b@q6_k"
 
 DEFAULT_CONCURRENCY = 128
 MAX_CURRENT_TASKS = 512
-MAX_TOKENS = 42000
+MAX_TOKENS = 7800
 TEMPERATURE = 0.6
 TOP_P = 0.95
 MAX_RETRIES = 5
@@ -111,7 +111,15 @@ async def main() -> None:
     print("max_current_tasks:", MAX_CURRENT_TASKS)
     print()
 
+    summaries = []
+    output_paths = []
     for input_cache_path, prerequisite_records in prerequisite_cache_parts:
+        output_path = stage_output_path_from_input_cache(
+            OUTPUT_BASE,
+            INPUT_CACHE_BASE,
+            input_cache_path,
+            "pure_text_segmentation",
+        )
         summary = await runner.run_cache_shard(
             input_cache_base=INPUT_CACHE_BASE,
             input_cache_path=input_cache_path,
@@ -124,8 +132,16 @@ async def main() -> None:
             extra_body=EXTRA_BODY,
             enable_visualization=ENABLE_VISUALIZATION,
         )
+        summaries.append(summary)
+        output_paths.append(output_path)
 
     runner.close_progress()
+    print_llm_pipeline_summary(
+        title="Pipeline 7: pure text segmentation",
+        summaries=summaries,
+        output_paths=output_paths,
+        stage="pure_text_segmentation",
+    )
 
 
 if __name__ == "__main__":

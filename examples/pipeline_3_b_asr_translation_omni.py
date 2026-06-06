@@ -25,7 +25,7 @@ from pipeline.runners import (
     TranslationOnlyRunner,
     load_pipeline_records_by_part,
 )
-from pipeline.runners.utils import cache_output_path, is_finished_omni_translation_record, load_pipeline_records_by_uid
+from pipeline.runners.utils import cache_output_path, is_finished_omni_translation_record, load_pipeline_records_by_uid, print_llm_pipeline_summary
 from pipeline.schema import PipelineRecord
 
 
@@ -114,9 +114,12 @@ async def main() -> None:
     print("max_current_tasks:", MAX_CURRENT_TASKS)
     print()
 
+    summaries = []
+    output_paths = []
     for input_cache_path, prerequisite_records in prerequisite_cache_parts:
         metadata_list = [record.metadata for record in prerequisite_records]
         metadata_jsonl_path = input_cache_path.parent / input_cache_path.name.replace("cache_", "metadata-", 1)
+        output_path = cache_output_path(OUTPUT_BASE, metadata_jsonl_path, "translation")
         summary = await runner.run_omni_translation_shard(
             metadata_jsonl_path=metadata_jsonl_path,
             metadata_list=metadata_list,
@@ -134,7 +137,15 @@ async def main() -> None:
         # print("pending:", summary["pending"])
         # print("finished:", summary["finished"])
         # print("failed:", summary["failed"])
+        summaries.append(summary)
+        output_paths.append(output_path)
     runner.close_progress()
+    print_llm_pipeline_summary(
+        title="Pipeline 3a: Omni transcription + translation",
+        summaries=summaries,
+        output_paths=output_paths,
+        stage="omni_translation",
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

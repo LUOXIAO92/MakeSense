@@ -18,7 +18,7 @@ from pipeline.runners import (
     TargetCentricMappingRunner,
     load_pipeline_records_by_part_latest,
 )
-from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
+from pipeline.runners.utils import load_pipeline_records_by_uid, print_llm_pipeline_summary, stage_output_path_from_input_cache
 
 DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
 
@@ -29,8 +29,8 @@ OUTPUT_BASE      = CACHE_ROOT / "pipeline_8_target_centric_mapping_deepseek-v4-f
 
 BASE_URL = os.environ.get("OPEN_ROUTER_BASE_URL")
 API_KEY = os.environ.get("OPEN_ROUTER_API_KEY")
-MODEL_NAME = "deepseek/deepseek-v4-flash"
-# MODEL_NAME = "google/gemini-3.1-flash-lite"
+# MODEL_NAME = "deepseek/deepseek-v4-flash"
+MODEL_NAME = "google/gemini-3.1-flash-lite"
 
 # BASE_URL = os.environ.get("DEEPSEEK_BASE_URL")
 # API_KEY = os.environ.get("DEEPSEEK_API_KEY")
@@ -39,9 +39,9 @@ MODEL_NAME = "deepseek/deepseek-v4-flash"
 # BASE_URL="http://127.0.0.1:12345/v1"
 # MODEL_NAME="qwen3.6-27b@q6_k"
 
-DEFAULT_CONCURRENCY = 128
+DEFAULT_CONCURRENCY = 32
 MAX_CURRENT_TASKS = 512
-MAX_TOKENS = 42000
+MAX_TOKENS = 12800
 TEMPERATURE = 0.6
 TOP_P = 0.95
 MAX_RETRIES = 5
@@ -116,8 +116,16 @@ async def main() -> None:
     print("max_current_tasks:", MAX_CURRENT_TASKS)
     print()
 
+    summaries = []
+    output_paths = []
     for input_cache_path, prerequisite_records in prerequisite_cache_parts:
-        await runner.run_cache_shard(
+        output_path = stage_output_path_from_input_cache(
+            OUTPUT_BASE,
+            INPUT_CACHE_BASE,
+            input_cache_path,
+            "target_centric_mapping",
+        )
+        summary = await runner.run_cache_shard(
             input_cache_base=INPUT_CACHE_BASE,
             input_cache_path=input_cache_path,
             prerequisite_records=prerequisite_records,
@@ -129,8 +137,16 @@ async def main() -> None:
             extra_body=EXTRA_BODY,
             enable_visualization=ENABLE_VISUALIZATION,
         )
+        summaries.append(summary)
+        output_paths.append(output_path)
 
     runner.close_progress()
+    print_llm_pipeline_summary(
+        title="Pipeline 8: target-centric mapping",
+        summaries=summaries,
+        output_paths=output_paths,
+        stage="target_centric_mapping",
+    )
 
 
 if __name__ == "__main__":

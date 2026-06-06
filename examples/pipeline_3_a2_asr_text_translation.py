@@ -27,7 +27,7 @@ from pipeline.runners import (
     TranslationOnlyRunner,
     load_pipeline_records_by_part_latest,
 )
-from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
+from pipeline.runners.utils import load_pipeline_records_by_uid, print_llm_pipeline_summary, stage_output_path_from_input_cache
 
 
 DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
@@ -119,8 +119,16 @@ async def main() -> None:
     print("max_current_tasks:", MAX_CURRENT_TASKS)
     print()
 
+    summaries = []
+    output_paths = []
     for input_cache_path, prerequisite_records in prerequisite_cache_parts:
-        await runner.run_cache_shard(
+        output_path = stage_output_path_from_input_cache(
+            OUTPUT_BASE,
+            INPUT_CACHE_BASE,
+            input_cache_path,
+            "translation",
+        )
+        summary = await runner.run_cache_shard(
             input_cache_base=INPUT_CACHE_BASE,
             input_cache_path=input_cache_path,
             prerequisite_records=prerequisite_records,
@@ -134,7 +142,15 @@ async def main() -> None:
             enable_audio_assisted_translation=ENABLE_AUDIO_ASSISTED_TRANSLATION,
             dataset_root=DATASET_ROOT,
         )
+        summaries.append(summary)
+        output_paths.append(output_path)
     runner.close_progress()
+    print_llm_pipeline_summary(
+        title="Pipeline 3 b2: Raw text translation",
+        summaries=summaries,
+        output_paths=output_paths,
+        stage="staged_translation",
+    )
 
 
 

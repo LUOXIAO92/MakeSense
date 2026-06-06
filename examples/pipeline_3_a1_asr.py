@@ -20,11 +20,11 @@ from pipeline.runners import TranscriptionRunner, load_pipeline_records_by_part_
 from pipeline.runners.utils import load_pipeline_records_by_uid, stage_output_path_from_input_cache
 
 
-# DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
-DATASET_ROOT = Path(".") / "dataset_test"
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+# DATASET_ROOT = Path(".") / "dataset_test"
 
-CACHE_ROOT       = Path(".") / "cache_test"
-# CACHE_ROOT       = DATASET_ROOT / "cache"
+# CACHE_ROOT       = Path(".") / "cache_test"
+CACHE_ROOT       = DATASET_ROOT / "cache"
 INPUT_CACHE_BASE = CACHE_ROOT  / "pipeline_2_initialized"
 OUTPUT_BASE      = CACHE_ROOT  / "pipeline_3_b1_asr_qwen3asr1.7b"
 
