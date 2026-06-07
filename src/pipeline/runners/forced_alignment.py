@@ -29,8 +29,36 @@ from pipeline.runners.utils import (
 class ForcedAlignmentRunner:
     """Public runner for source forced alignment."""
 
-    def __init__(self, concurrency: int = 4):
+    @staticmethod
+    def _validate_raw_alignment_token_timing(
+        tokens,
+        *,
+        repair_overlap: bool = False,
+        eps: float = 1e-8,
+    ) -> None:
+        for idx in range(len(tokens) - 1):
+            left = tokens[idx]
+            right = tokens[idx + 1]
+            if left.end <= right.start + eps:
+                continue
+            if left.end >= right.end:
+                raise ValueError(
+                    "Forced-alignment validation error: raw token timing is causally invalid/non-repairable: "
+                    f"token[{idx}]={left.word!r} start={left.start:.6f} end={left.end:.6f}, "
+                    f"token[{idx + 1}]={right.word!r} start={right.start:.6f} end={right.end:.6f}"
+                )
+            if not repair_overlap:
+                raise ValueError(
+                    "Forced-alignment validation error: raw token timing is not monotonic/non-overlapping: "
+                    f"token[{idx}]={left.word!r} start={left.start:.6f} end={left.end:.6f}, "
+                    f"token[{idx + 1}]={right.word!r} start={right.start:.6f} end={right.end:.6f}; "
+                    "repair_raw_token_timing_overlap is disabled"
+                )
+            right.start = left.end
+
+    def __init__(self, concurrency: int = 4, *, repair_raw_token_timing_overlap: bool = False):
         self.concurrency = concurrency
+        self.repair_raw_token_timing_overlap = repair_raw_token_timing_overlap
         self._tqdm_bar = TqdmBar()
 
     def reset_progress(
@@ -421,6 +449,16 @@ class ForcedAlignmentRunner:
                 words_list.append(words)
 
         for record, tokens, words in zip(records, tokens_list, words_list):
+            try:
+                self._validate_raw_alignment_token_timing(
+                    tokens,
+                    repair_overlap=self.repair_raw_token_timing_overlap,
+                )
+            except ValueError as exc:
+                record.source.status.forced_alignment.status = StatusEnum.FAILED
+                record.source.status.forced_alignment.errors = [str(exc)]
+                continue
+
             record.source.artifacts.alignment = AlignmentArtifact(
                 tokens=tokens,
                 words=words,

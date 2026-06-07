@@ -461,7 +461,11 @@ class MakeSenseMonitoringCallback(TrainerCallback):
     ) -> dict[str, Any]:
         if self.progress is not None:
             self.progress.break_line()
-        summary = self.tester.evaluate(model=model, step=step, metrics=metrics)
+        summary = self.tester.evaluate(
+            model=model,
+            step=step,
+            metrics=metrics,
+        )
         print_test_summary(summary)
         markdown_path = self._write_test_markdown(summary, final=final)
         if markdown_path is not None:

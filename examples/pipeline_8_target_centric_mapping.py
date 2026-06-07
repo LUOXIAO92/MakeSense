@@ -37,10 +37,10 @@ MODEL_NAME = "google/gemini-3.1-flash-lite"
 # MODEL_NAME = "deepseek-v4-flash"
 
 # BASE_URL="http://127.0.0.1:12345/v1"
-# MODEL_NAME="qwen3.6-27b@q6_k"
+# MODEL_NAME="qwen3.6-27b"
 
 DEFAULT_CONCURRENCY = 32
-MAX_CURRENT_TASKS = 512
+MAX_CURRENT_TASKS = 32
 MAX_TOKENS = 12800
 TEMPERATURE = 0.6
 TOP_P = 0.95

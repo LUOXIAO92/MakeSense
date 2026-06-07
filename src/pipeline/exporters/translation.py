@@ -13,7 +13,7 @@ from pipeline.exporters.utils import collapse_authors
 from pipeline.exporters.transcription import record_to_transcription
 
 from core.schema import Translation
-from core.build_conversation import build_translation_blocks
+from core.build_conversation import build_translation_blocks, count_max_empty_translation_windows
 
 
 def is_ready_for_translation_export(
@@ -76,13 +76,12 @@ def record_to_translation(
     transcription = record_to_transcription(record)
     if transcription is None:
         return None
-    _, max_empty_window = build_translation_blocks(
+    translation_blocks = build_translation_blocks(
         record.metadata,
         transcription,
         translation,
-        tolerance_window=0,
     )
-    translation.max_empty_window = max_empty_window
+    translation.max_empty_window = count_max_empty_translation_windows(translation_blocks)
 
     return translation
 

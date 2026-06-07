@@ -761,15 +761,25 @@ def _validate_source_sense_units_assign_to_release_windows_or_raise(
     word_release_window_indices: list[int | None] = [None] * len(words)
     for chunk_idx, chunk in enumerate(chunks):
         is_final_chunk = chunk_idx == len(chunks) - 1
+        chunk_word_ids = {word_id for word_id, word in enumerate(words) if any(chunk_word is word for chunk_word in chunk.words)}
+        tail_absorption_active = False
         while assigned_group_count < len(source_sense_unit_groups):
             group = list(source_sense_unit_groups[assigned_group_count])
+            first_word_idx = group[0]
             last_word_idx = group[-1]
             seg_end = words[last_word_idx].end
-            last_word_is_in_chunk = any(word is words[last_word_idx] for word in chunk.words)
-            last_token_final_overrun = is_final_chunk and last_word_idx == len(words) - 1 and last_word_is_in_chunk
-            if seg_end < chunk.end + eps or last_token_final_overrun:
+            group_reaches_final_chunk = any(word_id in chunk_word_ids for word_id in group)
+            group_overlaps_final_window = words[first_word_idx].start < chunk.end + eps
+            final_chunk_absorbed_group = (
+                is_final_chunk
+                and group_reaches_final_chunk
+                and (tail_absorption_active or group_overlaps_final_window)
+            )
+            if seg_end < chunk.end + eps or final_chunk_absorbed_group:
                 for word_id in group:
                     word_release_window_indices[word_id] = chunk_idx
+                if final_chunk_absorbed_group and seg_end >= chunk.end + eps:
+                    tail_absorption_active = True
                 assigned_group_count += 1
             else:
                 break

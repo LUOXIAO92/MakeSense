@@ -15,11 +15,20 @@ from pathlib import Path
 from typing import Literal
 
 from configs.config import Config
-from core.build_conversation import build_asr_blocks, build_translation_blocks
+from core.build_conversation import (
+    build_asr_blocks,
+    build_conservative_translation_blocks,
+    build_fixed_window_translation_blocks,
+    build_translation_blocks,
+    count_max_empty_translation_windows,
+)
 from core.schema import MetaData, Transcription, Translation
 
 
 TaskName = Literal["asr", "translation"]
+TranslationMode = Literal["natural", "fixed_window", "conservative"]
+TranslationTaskName = Literal["natural", "fixed_window", "conservative"]
+TranslationTaskConfig = dict[str, dict[str, float | int | None]]
 
 
 @dataclass(frozen=True)
@@ -47,6 +56,8 @@ class TrainingExample:
     tolerance_window: int
     audio_path: str
     src_outputs: list[str]
+    translation_mode: TranslationMode | None = None
+    min_wait_window: int | None = None
     tgt_outputs: list[str] | None = None
 
     @property
@@ -74,6 +85,21 @@ class TrainingDatasetSplits:
     test: list[TrainingExample]
 
 
+
+
+@dataclass(frozen=True)
+class _TranslationSourceRecord:
+    """One translation-capable final-dataset row before training task/window sampling."""
+
+    uid: str
+    source_language: str
+    target_language: str
+    metadata: MetaData
+    transcription: Transcription
+    translation: Translation
+    audio_path: str
+
+
 @dataclass(frozen=True)
 class _BaseTrainingRecord:
     """One selected translation-capable record before task conversion."""
@@ -81,6 +107,8 @@ class _BaseTrainingRecord:
     uid: str
     source_language: str
     target_language: str
+    translation_mode: TranslationMode
+    min_wait_window: int | None
     tolerance_window: int
     audio_path: str
     asr_blocks: list[str]
@@ -194,21 +222,6 @@ def load_translations(dataset_root: str | Path) -> list[LoadedTranslation]:
     return loaded
 
 
-def _sample_tolerance(
-    rng: random.Random,
-    *,
-    max_empty_window: int,
-    tolerance_window: int | None,
-) -> int:
-    if tolerance_window is not None:
-        if tolerance_window < 0:
-            raise ValueError(f"tolerance_window must be non-negative or None: {tolerance_window}")
-        return tolerance_window
-
-    upper = max_empty_window - 1
-    return rng.randint(0, max(0, upper))
-
-
 def _effective_build_tolerance_window(
     *,
     real_max_tolerance_window: int,
@@ -219,18 +232,6 @@ def _effective_build_tolerance_window(
     if requested_tolerance_window < 0:
         raise ValueError(f"requested_tolerance_window must be non-negative: {requested_tolerance_window}")
     return max(real_max_tolerance_window, requested_tolerance_window)
-
-
-def _count_real_wait_windows(translation_blocks: list[str]) -> int:
-    max_empty_window_count = 0
-    current_empty_window_count = 0
-    for block in translation_blocks:
-        if "<tgt><|wait|></tgt>" in block:
-            current_empty_window_count += 1
-        else:
-            max_empty_window_count = max(max_empty_window_count, current_empty_window_count)
-            current_empty_window_count = 0
-    return max(max_empty_window_count, current_empty_window_count)
 
 
 def _combine_translation_blocks(asr_blocks: list[str], translation_blocks: list[str]) -> list[str]:
@@ -267,9 +268,9 @@ def _counts_from_ratio(total: int, ratio: tuple[float, ...]) -> list[int]:
 
 def _sample_examples(
     rng: random.Random,
-    examples: list[_BaseTrainingRecord],
+    examples: list[_TranslationSourceRecord],
     count: int,
-) -> list[_BaseTrainingRecord]:
+) -> list[_TranslationSourceRecord]:
     if count == 0:
         return []
     if not examples:
@@ -279,26 +280,78 @@ def _sample_examples(
     return [rng.choice(examples) for _ in range(count)]
 
 
-def _build_base_training_records(
-    dataset_root: str | Path,
+def _validate_translation_task_config(config: TranslationTaskConfig) -> None:
+    expected = {"natural", "fixed_window", "conservative"}
+    unknown = set(config) - expected
+    if unknown:
+        raise ValueError(f"Unsupported translation task config keys: {sorted(unknown)}")
+    for name in expected:
+        if name not in config:
+            raise ValueError(f"Missing translation task config section: {name}")
+        ratio = config[name].get("ratio")
+        if ratio is None:
+            raise ValueError(f"translation task {name!r} requires an explicit ratio")
+        if float(ratio) < 0:
+            raise ValueError(f"translation task {name!r} ratio must be non-negative: {ratio}")
+    ratio_sum = sum(float(config[name]["ratio"]) for name in expected)
+    if ratio_sum <= 0:
+        raise ValueError("At least one translation task ratio must be positive")
+    for name in ("fixed_window", "conservative"):
+        min_value = config[name].get("min")
+        max_value = config[name].get("max")
+        if min_value is not None and int(min_value) < 0:
+            raise ValueError(f"{name}.min must be non-negative or None: {min_value}")
+        if max_value is not None and int(max_value) < 0:
+            raise ValueError(f"{name}.max must be non-negative or None: {max_value}")
+        if min_value is not None and max_value is not None and int(min_value) > int(max_value):
+            raise ValueError(f"{name}.min must be <= max: min={min_value}, max={max_value}")
+
+
+def _translation_task_labels(config: TranslationTaskConfig, count: int) -> list[TranslationTaskName]:
+    names: tuple[TranslationTaskName, ...] = ("natural", "fixed_window", "conservative")
+    ratios = tuple(float(config[name]["ratio"]) for name in names)
+    counts = _counts_from_ratio(count, ratios)
+    labels: list[TranslationTaskName] = []
+    for name, name_count in zip(names, counts):
+        labels.extend([name] * name_count)
+    return labels
+
+
+def _window_bounds_for_record(
     *,
-    tolerance_window: int | None = None,
-    seed: int = 4021,
-) -> list[_BaseTrainingRecord]:
-    """Build translation-capable base records from final dataset files.
+    config: dict[str, float | int | None],
+    max_empty_window: int,
+    mode: TranslationTaskName,
+) -> tuple[int, int]:
+    if max_empty_window < 0:
+        raise ValueError(f"max_empty_window must be non-negative: {max_empty_window}")
+    configured_min = config.get("min")
+    configured_max = config.get("max")
+    lower = 1 if configured_min is None else int(configured_min)
+    upper = max_empty_window if configured_max is None else min(int(configured_max), max_empty_window)
+    if lower > upper:
+        raise ValueError(
+            f"No valid {mode} window for record max_empty_window={max_empty_window}: "
+            f"min={configured_min}, max={configured_max}. Use min=0 explicitly to allow zero-window sampling."
+        )
+    return lower, upper
 
-    Final dataset rows currently store canonical transcription/translation schema,
-    not materialized training ``src_outputs`` / ``tgt_outputs`` arrays.  Therefore
-    this function performs the narrow final-schema -> training-release-array
-    conversion at the data-loader boundary.  Trainer code must consume the
-    resulting arrays and must not rebuild release logic.
-    """
 
-    rng = random.Random(seed)
+def _sample_window_from_config(
+    rng: random.Random,
+    *,
+    config: dict[str, float | int | None],
+    max_empty_window: int,
+    mode: TranslationTaskName,
+) -> int:
+    lower, upper = _window_bounds_for_record(config=config, max_empty_window=max_empty_window, mode=mode)
+    return rng.randint(lower, upper)
+
+
+def _build_translation_source_records(dataset_root: str | Path) -> list[_TranslationSourceRecord]:
     transcriptions = load_transcriptions(dataset_root)
     metadata_by_key = load_metadata(dataset_root)
-    base_records: list[_BaseTrainingRecord] = []
-    configured_tolerance_window = tolerance_window
+    source_records: list[_TranslationSourceRecord] = []
 
     for loaded_translation in load_translations(dataset_root):
         key = (loaded_translation.source_language, loaded_translation.translation.uid)
@@ -313,40 +366,95 @@ def _build_base_training_records(
         audio_path = _audio_path_from_metadata(dataset_root, loaded_translation.source_language, metadata) if original_metadata else str(
             Path(dataset_root) / "audio" / loaded_translation.source_language / f"{transcription.uid}.wav"
         )
-        requested_tolerance_window = _sample_tolerance(
-            rng,
-            max_empty_window=loaded_translation.translation.max_empty_window,
-            tolerance_window=configured_tolerance_window,
+        source_records.append(
+            _TranslationSourceRecord(
+                uid=loaded_translation.translation.uid,
+                source_language=loaded_translation.source_language,
+                target_language=loaded_translation.target_language,
+                metadata=metadata,
+                transcription=transcription,
+                translation=loaded_translation.translation,
+                audio_path=audio_path,
+            )
         )
+    return source_records
+
+
+def _source_record_to_base_training_record(
+    source_record: _TranslationSourceRecord,
+    *,
+    translation_mode: TranslationMode,
+    requested_window: int | None,
+) -> _BaseTrainingRecord:
+    if translation_mode == "natural":
+        min_wait_window = None
+        translation_blocks = build_translation_blocks(
+            source_record.metadata,
+            source_record.transcription,
+            source_record.translation,
+        )
+    elif translation_mode == "conservative":
+        if requested_window is None:
+            raise ValueError("Conservative translation requires requested_window")
+        min_wait_window = requested_window
+        translation_blocks = build_conservative_translation_blocks(
+            source_record.metadata,
+            source_record.transcription,
+            source_record.translation,
+            min_wait_window=min_wait_window,
+        )
+    elif translation_mode == "fixed_window":
+        if requested_window is None:
+            raise ValueError("Fixed-window translation requires requested_window")
+        min_wait_window = None
         effective_tolerance_window = _effective_build_tolerance_window(
-            real_max_tolerance_window=loaded_translation.translation.max_empty_window,
-            requested_tolerance_window=requested_tolerance_window,
+            real_max_tolerance_window=source_record.translation.max_empty_window,
+            requested_tolerance_window=requested_window,
         )
-        translation_blocks, real_tolerance_window = build_translation_blocks(
-            metadata,
-            transcription,
-            loaded_translation.translation,
+        translation_blocks = build_fixed_window_translation_blocks(
+            source_record.metadata,
+            source_record.transcription,
+            source_record.translation,
             tolerance_window=effective_tolerance_window,
         )
-        observed_real_tolerance_window = _count_real_wait_windows(translation_blocks)
-        if real_tolerance_window != observed_real_tolerance_window:
-            raise ValueError(
-                "build_translation_blocks returned inconsistent wait-window count: "
-                f"returned={real_tolerance_window}, observed={observed_real_tolerance_window}"
-            )
-        base_records.append(
-            _BaseTrainingRecord(
-                uid=loaded_translation.translation.uid,
-                source_language=_language_name(loaded_translation.source_language),
-                target_language=_language_name(loaded_translation.target_language),
-                tolerance_window=real_tolerance_window,
-                audio_path=audio_path,
-                asr_blocks=build_asr_blocks(metadata, transcription),
-                translation_blocks=translation_blocks,
-            )
-        )
+    else:
+        raise ValueError(f"Unsupported translation_mode: {translation_mode}")
 
-    return base_records
+    real_tolerance_window = count_max_empty_translation_windows(translation_blocks)
+    return _BaseTrainingRecord(
+        uid=source_record.uid,
+        source_language=_language_name(source_record.source_language),
+        target_language=_language_name(source_record.target_language),
+        translation_mode=translation_mode,
+        min_wait_window=min_wait_window,
+        tolerance_window=real_tolerance_window,
+        audio_path=source_record.audio_path,
+        asr_blocks=build_asr_blocks(source_record.metadata, source_record.transcription),
+        translation_blocks=translation_blocks,
+    )
+
+
+def _build_sampled_training_record(
+    rng: random.Random,
+    source_record: _TranslationSourceRecord,
+    *,
+    translation_mode: TranslationTaskName,
+    translation_task_config: TranslationTaskConfig,
+) -> _BaseTrainingRecord:
+    if translation_mode == "natural":
+        requested_window = None
+    else:
+        requested_window = _sample_window_from_config(
+            rng,
+            config=translation_task_config[translation_mode],
+            max_empty_window=source_record.translation.max_empty_window,
+            mode=translation_mode,
+        )
+    return _source_record_to_base_training_record(
+        source_record,
+        translation_mode=translation_mode,
+        requested_window=requested_window,
+    )
 
 
 def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: TaskName) -> TrainingExample:
@@ -356,6 +464,8 @@ def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: Tas
             uid=base_record.uid,
             source_language=base_record.source_language,
             target_language=None,
+            translation_mode=None,
+            min_wait_window=None,
             tolerance_window=base_record.tolerance_window,
             audio_path=base_record.audio_path,
             src_outputs=base_record.asr_blocks,
@@ -366,11 +476,57 @@ def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: Tas
         uid=base_record.uid,
         source_language=base_record.source_language,
         target_language=base_record.target_language,
+        translation_mode=base_record.translation_mode,
+        min_wait_window=base_record.min_wait_window,
         tolerance_window=base_record.tolerance_window,
         audio_path=base_record.audio_path,
         src_outputs=base_record.asr_blocks,
         tgt_outputs=base_record.translation_blocks,
     )
+
+
+def _build_training_examples_from_source_records(
+    rng: random.Random,
+    source_records: list[_TranslationSourceRecord],
+    *,
+    task_ratio: tuple[float, float],
+    translation_task_config: TranslationTaskConfig,
+) -> list[TrainingExample]:
+    """Assign task/subtask labels and convert selected source rows to examples."""
+
+    sample_count = len(source_records)
+    if sample_count == 0:
+        return []
+
+    translation_count, asr_count = _counts_from_ratio(sample_count, task_ratio)
+    task_labels: list[TaskName] = ["translation"] * translation_count + ["asr"] * asr_count
+    rng.shuffle(task_labels)
+    translation_labels = _translation_task_labels(translation_task_config, translation_count)
+    rng.shuffle(translation_labels)
+
+    examples: list[TrainingExample] = []
+    translation_label_idx = 0
+    for source_record, task_label in zip(source_records, task_labels):
+        if task_label == "asr":
+            base_record = _source_record_to_base_training_record(
+                source_record,
+                translation_mode="natural",
+                requested_window=None,
+            )
+            examples.append(_base_record_to_training_example(base_record, "asr"))
+            continue
+        translation_subtask = translation_labels[translation_label_idx]
+        translation_label_idx += 1
+        base_record = _build_sampled_training_record(
+            rng,
+            source_record,
+            translation_mode=translation_subtask,
+            translation_task_config=translation_task_config,
+        )
+        examples.append(_base_record_to_training_example(base_record, "translation"))
+
+    rng.shuffle(examples)
+    return examples
 
 
 def build_training_dataset(
@@ -379,62 +535,68 @@ def build_training_dataset(
     total_samples: int | None = None,
     task_ratio: tuple[float, float] = (9, 1),
     split_ratio: tuple[float, float, float] = (8, 1.5, 0.5),
-    tolerance_window: int | None = None,
+    translation_task_config: TranslationTaskConfig,
+    dataset_repeat: int = 1,
     seed: int = 4021,
 ) -> TrainingDatasetSplits:
     """Build fixed-size train/validate/test splits from translation base records.
 
-    ``task_ratio`` is ``(translation, asr)``.  ASR examples are created by
-    converting selected base translation records to source-only blocks; they are
-    not added as extra samples.  Therefore the final sample count is always the
-    selected translation-base count.  If ``total_samples`` is ``None``, all
-    available translation records are used as the base set.
+    ``task_ratio`` is ``(translation, asr)`` and is one configuration group.
+    ``translation_task_config`` is a separate group used only after a selected
+    sample has been assigned to the ``translation`` task.  Its required keys are
+    ``natural``, ``fixed_window``, and ``conservative``; their ``ratio`` values
+    are normalized together.  ``fixed_window`` / ``conservative`` additionally
+    accept explicit ``min`` / ``max`` window bounds.  ``None`` lower bounds mean
+    ``1`` by default, so zero-window training is included only when ``min`` is
+    explicitly set to ``0``.
 
-    ``tolerance_window`` and random tolerance augmentation are exclusive.  When
-    ``tolerance_window`` is an integer, including ``0``, that exact value is used
-    as the requested emission-cadence input.  When ``tolerance_window`` is
-    ``None``, a random requested cadence is sampled from the exported real wait
-    budget ``Translation.max_empty_window``.  Translation blocks are built with
-    ``max(Translation.max_empty_window, requested_tolerance_window)`` so final
-    outputs satisfy the exported real wait budget and any requested lower bound.
-    The ``TrainingExample.tolerance_window`` stored on output is the real maximum
-    consecutive wait-window count observed in the produced blocks, not merely
-    the requested cadence input.  Therefore requested ``tolerance_window=0``
-    means "translate immediately when ready" only when the exported real wait
-    budget is also ``0``; otherwise the exported real budget controls block
-    generation.
+    ``dataset_repeat`` repeats only the selected train source-record pool before
+    assigning task labels / translation subtask labels, so the same final dataset
+    row can appear in multiple training modes without duplicating validation or
+    test samples.  No ``**kwargs`` are used: all sampling controls are explicit
+    parameters.
     """
 
     if len(task_ratio) != 2:
         raise ValueError(f"task_ratio must be (translation, asr), got: {task_ratio}")
     if len(split_ratio) != 3:
         raise ValueError(f"split_ratio must be (train, validate, test), got: {split_ratio}")
+    if dataset_repeat < 1:
+        raise ValueError(f"dataset_repeat must be >= 1: {dataset_repeat}")
 
     rng = random.Random(seed)
-    base_records = _build_base_training_records(
-        dataset_root,
-        tolerance_window=tolerance_window,
-        seed=seed,
-    )
-    sample_count = len(base_records) if total_samples is None else total_samples
-    sampled_base_records = _sample_examples(rng, base_records, sample_count)
+    _validate_translation_task_config(translation_task_config)
+    source_records = _build_translation_source_records(dataset_root)
+    base_sample_count = len(source_records) if total_samples is None else min(total_samples, len(source_records))
+    sampled_source_records = _sample_examples(rng, source_records, base_sample_count)
+    rng.shuffle(sampled_source_records)
 
-    translation_count, asr_count = _counts_from_ratio(sample_count, task_ratio)
-    task_labels: list[TaskName] = ["translation"] * translation_count + ["asr"] * asr_count
-    rng.shuffle(task_labels)
-    sampled_examples = [
-        _base_record_to_training_example(base_record, task_label)
-        for base_record, task_label in zip(sampled_base_records, task_labels)
-    ]
-    rng.shuffle(sampled_examples)
-
-    train_count, validate_count, test_count = _counts_from_ratio(sample_count, split_ratio)
+    train_count, validate_count, test_count = _counts_from_ratio(base_sample_count, split_ratio)
     train_end = train_count
     validate_end = train_end + validate_count
     test_end = validate_end + test_count
 
+    train_source_records = sampled_source_records[:train_end] * dataset_repeat
+    validate_source_records = sampled_source_records[train_end:validate_end]
+    test_source_records = sampled_source_records[validate_end:test_end]
+
     return TrainingDatasetSplits(
-        train=sampled_examples[:train_end],
-        validate=sampled_examples[train_end:validate_end],
-        test=sampled_examples[validate_end:test_end],
+        train=_build_training_examples_from_source_records(
+            rng,
+            train_source_records,
+            task_ratio=task_ratio,
+            translation_task_config=translation_task_config,
+        ),
+        validate=_build_training_examples_from_source_records(
+            rng,
+            validate_source_records,
+            task_ratio=task_ratio,
+            translation_task_config=translation_task_config,
+        ),
+        test=_build_training_examples_from_source_records(
+            rng,
+            test_source_records,
+            task_ratio=task_ratio,
+            translation_task_config=translation_task_config,
+        ),
     )

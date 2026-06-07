@@ -9,38 +9,50 @@ from data_loader.dataset import TrainingExample
 
 ChatMessage = dict[str, Any]
 
+# Optional ablation variant to test whether explicitly encouraging
+# transcription-guided translation helps the model learn the
+# audio+transcription->translation strategy faster:
+# TRANSLATION_PROMPT_WITH_TRANSCRIPTION = (
+#     "You are a professional simultaneous interpreter. "
+#     "Refer to the transcription, then translate to {target_language}."
+# )
 
-def system_prompt_for_example(
-    example: TrainingExample,
-    *,
-    requested_tolerance_window: int | None,
-) -> str:
-    """Return the system prompt for one training example.
 
-    ``requested_tolerance_window`` mirrors the value passed to
-    ``build_training_dataset(...)``.  When it is ``None``, examples may have a
-    sampled/effective real wait budget and the prompt should expose the concrete
-    ``TrainingExample.tolerance_window``.  When it is fixed at ``0``, translation
-    examples use the concise no-latency instruction tested by the user.
-    """
+def system_prompt_for_example(example: TrainingExample) -> str:
+    """Return the system prompt for one training example."""
 
     if example.task == "asr":
-        return "Transcribe"
+        return "You are a professional transcriptionist. Transcribe what you hear."
     if example.task != "translation":
         raise ValueError(f"Unsupported training task: {example.task}")
     if example.target_language is None:
         raise ValueError(f"Translation example {example.uid} has no target language")
 
-    if requested_tolerance_window is not None and requested_tolerance_window == 0:
-        return f"Translate to {example.target_language}."
-    return f"Translate to {example.target_language}, tolerance window size is {example.tolerance_window}"
+    if example.translation_mode == "natural":
+        return (
+            "You are a professional simultaneous interpreter. "
+            f"Translate to {example.target_language}."
+        )
+    if example.translation_mode == "fixed_window":
+        return (
+            "You are a professional simultaneous interpreter. "
+            f"Translate to {example.target_language}. "
+            f"Tolerance window size is {example.tolerance_window}."
+        )
+    if example.translation_mode == "conservative":
+        if example.min_wait_window is None:
+            raise ValueError(f"Conservative translation example {example.uid} has no min_wait_window")
+        return (
+            "You are a professional simultaneous interpreter. "
+            f"Translate to {example.target_language}. "
+            f"Keep at least {example.min_wait_window} wait windows before each target release."
+        )
+    raise ValueError(
+        f"Unsupported translation mode for example {example.uid}: {example.translation_mode}"
+    )
 
 
-def example_to_messages(
-    example: TrainingExample,
-    *,
-    requested_tolerance_window: int | None,
-) -> list[ChatMessage]:
+def example_to_messages(example: TrainingExample) -> list[ChatMessage]:
     """Convert one training example into multi-turn chat messages."""
 
     src_outputs = example.src_outputs
@@ -64,10 +76,7 @@ def example_to_messages(
     messages: list[ChatMessage] = [
         {
             "role": "system",
-            "content": system_prompt_for_example(
-                example,
-                requested_tolerance_window=requested_tolerance_window,
-            ),
+            "content": system_prompt_for_example(example),
         }
     ]
     for assistant_output in assistant_outputs:

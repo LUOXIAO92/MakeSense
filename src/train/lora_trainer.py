@@ -18,7 +18,7 @@ import math as _math
 import math
 import os
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ from mm_assistant_mask import (
     build_assistant_labels,
 )
 
-from data_loader.dataset import TrainingExample, TrainingDatasetSplits, build_training_dataset
+from data_loader.dataset import TrainingExample, TrainingDatasetSplits, TranslationTaskConfig, build_training_dataset
 from train.continue_utils import ContinuePlan, confirm_resume_arg_mismatches, timestamp_run_dir_name
 from train.formatting import ChatMessage, example_to_messages
 from train.monitoring import MakeSenseMonitoringCallback, TensorBoardServer, latest_logged_metrics_from_state
@@ -41,7 +41,12 @@ class TrainingDataConfig:
     total_samples: int | None = None
     task_ratio: tuple[float, float] = (9, 1)
     split_ratio: tuple[float, float, float] = (8, 1.5, 0.5)
-    tolerance_window: int | None = None
+    translation_task_config: TranslationTaskConfig = field(default_factory=lambda: {
+        "natural": {"ratio": 1},
+        "fixed_window": {"ratio": 4, "min": None, "max": None},
+        "conservative": {"ratio": 4, "min": None, "max": None},
+    })
+    dataset_repeat: int = 1
     seed: int = 4021
 
 
@@ -59,10 +64,13 @@ class LoraTrainConfig:
     adam_beta2: float = 0.999
     num_train_epochs: int = 1
     per_device_train_batch_size: int = 1
+    per_device_eval_batch_size: int = 1
     gradient_accumulation_steps: int = 8
     warmup_steps: int = 5
     logging_steps: int = 1
     eval_steps: int = 100
+    prediction_loss_only: bool = True
+    eval_accumulation_steps: int | None = 1
     save_steps: int = 500
     max_grad_norm: float = 1.0
     max_steps: int = -1
@@ -97,15 +105,12 @@ def _set_seed(seed: int) -> None:
 
 def _examples_to_rows(
     examples: list[TrainingExample],
-    *,
-    requested_tolerance_window: int | None,
 ) -> list[dict[str, Any]]:
     return [
         {
             "example": example,
             "messages": example_to_messages(
                 example,
-                requested_tolerance_window=requested_tolerance_window,
             ),
         }
         for example in examples
@@ -317,12 +322,10 @@ class MakeSenseAudioCollator:
 
 def _build_train_validate_test_rows(
     splits: TrainingDatasetSplits,
-    *,
-    requested_tolerance_window: int | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None, list[dict[str, Any]]]:
-    train_rows = _examples_to_rows(splits.train, requested_tolerance_window=requested_tolerance_window)
-    validate_rows = _examples_to_rows(splits.validate, requested_tolerance_window=requested_tolerance_window)
-    test_rows = _examples_to_rows(splits.test, requested_tolerance_window=requested_tolerance_window)
+    train_rows = _examples_to_rows(splits.train)
+    validate_rows = _examples_to_rows(splits.validate)
+    test_rows = _examples_to_rows(splits.test)
     if not train_rows:
         raise ValueError("Training split is empty; adjust total_samples/split_ratio")
     return train_rows, validate_rows or None, test_rows
@@ -373,6 +376,7 @@ def _format_startup_metadata(
         "",
         "Training Steps",
         f"  - PER_DEVICE_TRAIN_BATCH_SIZE: {train_config.per_device_train_batch_size}",
+        f"  - PER_DEVICE_EVAL_BATCH_SIZE: {train_config.per_device_eval_batch_size}",
         f"  - GRADIENT_ACCUMULATION_STEPS: {train_config.gradient_accumulation_steps}",
         f"  - EFFECTIVE_BATCH_SIZE: {effective_batch_size}",
         f"    `PER_DEVICE_TRAIN_BATCH_SIZE: {train_config.per_device_train_batch_size} * GRADIENT_ACCUMULATION_STEPS: {train_config.gradient_accumulation_steps}`",
@@ -454,13 +458,11 @@ def train_lora(
         total_samples=data_config.total_samples,
         task_ratio=data_config.task_ratio,
         split_ratio=data_config.split_ratio,
-        tolerance_window=data_config.tolerance_window,
+        translation_task_config=data_config.translation_task_config,
+        dataset_repeat=data_config.dataset_repeat,
         seed=data_config.seed,
     )
-    train_rows, validate_rows, test_rows = _build_train_validate_test_rows(
-        splits,
-        requested_tolerance_window=data_config.tolerance_window,
-    )
+    train_rows, validate_rows, test_rows = _build_train_validate_test_rows(splits)
     for row in train_rows:
         messages = row["messages"]
         _assert_message_order(messages)
@@ -500,6 +502,7 @@ def train_lora(
     args = TrainingArguments(
         output_dir=str(output_dir),
         per_device_train_batch_size=train_config.per_device_train_batch_size,
+        per_device_eval_batch_size=train_config.per_device_eval_batch_size,
         gradient_accumulation_steps=train_config.gradient_accumulation_steps,
         learning_rate=train_config.learning_rate,
         weight_decay=train_config.weight_decay,
@@ -509,6 +512,8 @@ def train_lora(
         warmup_steps=train_config.warmup_steps,
         logging_steps=train_config.logging_steps,
         eval_steps=train_config.eval_steps,
+        prediction_loss_only=train_config.prediction_loss_only,
+        eval_accumulation_steps=train_config.eval_accumulation_steps,
         save_steps=train_config.save_steps,
         max_grad_norm=train_config.max_grad_norm,
         max_steps=train_config.max_steps,

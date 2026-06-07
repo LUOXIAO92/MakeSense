@@ -27,14 +27,27 @@ from train.continue_utils import prepare_lora_model_for_continue, resolve_contin
 # --- Dataset controls ---
 DATASET_ROOT = Path("dataset_test")
 TOTAL_SAMPLES: int | None = None
-TASK_RATIO: tuple[float, float] = (9, 1)
-SPLIT_RATIO: tuple[float, float, float] = (8, 1.5, 0.5)
-TOLERANCE_WINDOW: int | None = None
 SEED = 4021
+
+# Dataset sampling group: repeat the source record pool, then shuffle and assign
+# task labels. `TASK_RATIO` is (translation, asr), and `SPLIT_RATIO` is (train, validate, test).
+DATASET_REPEAT = 3
+TASK_RATIO: tuple[float, float] = (9, 1)
+SPLIT_RATIO: tuple[float, float, float] = (0.75, 0.15, 0.1)
+
+# Translation-subtask sampling group: used only after a sample is assigned to the
+# translation task. The three ratio values are normalized together. For
+# fixed_window/conservative, min=None means 1; set min=0 explicitly if zero-window
+# sampling should be allowed. max=None means the record's max available window.
+TRANSLATION_TASK_CONFIG = {
+    "natural":      {"ratio": 2},
+    "fixed_window": {"ratio": 4, "min": 0, "max": None},
+    "conservative": {"ratio": 4, "min": 0, "max": None},
+}
 
 
 # --- Output / checkpoint controls ---
-OUTPUT_DIR = Path("outputs") / "makesense_lora1"
+OUTPUT_DIR = Path("outputs") / "makesense_lora2"
 CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
@@ -69,13 +82,15 @@ MAX_GRAD_NORM = 1.0
 NUM_TRAIN_EPOCHS = 20
 MAX_STEPS = -1
 PER_DEVICE_TRAIN_BATCH_SIZE = 1
+PER_DEVICE_EVAL_BATCH_SIZE = 1
 GRADIENT_ACCUMULATION_STEPS = 8
-WARMUP_STEPS = 5
+WARMUP_STEPS = int(0.01 * 120 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
 LOGGING_STEPS = 1
 EVAL_STEPS = 50
+EVAL_ACCUMULATION_STEPS = 1
 SAVE_STEPS = 50
 TEST_STEPS = 50
-TEST_MAX_NEW_TOKENS = 256
+TEST_MAX_NEW_TOKENS = 512
 TEST_RECORD_COUNT = -1
 TEST_OUTPUT_MARKDOWN = True
 
@@ -136,7 +151,8 @@ def main() -> None:
         total_samples=TOTAL_SAMPLES,
         task_ratio=TASK_RATIO,
         split_ratio=SPLIT_RATIO,
-        tolerance_window=TOLERANCE_WINDOW,
+        translation_task_config=TRANSLATION_TASK_CONFIG,
+        dataset_repeat=DATASET_REPEAT,
         seed=SEED,
     )
     continue_plan = resolve_continue_plan(
@@ -156,10 +172,12 @@ def main() -> None:
         num_train_epochs=NUM_TRAIN_EPOCHS,
         max_steps=MAX_STEPS,
         per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
+        per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
         gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
         warmup_steps=WARMUP_STEPS,
         logging_steps=LOGGING_STEPS,
         eval_steps=EVAL_STEPS,
+        eval_accumulation_steps=EVAL_ACCUMULATION_STEPS,
         save_steps=SAVE_STEPS,
         max_grad_norm=MAX_GRAD_NORM,
         test_steps=TEST_STEPS,

@@ -15,7 +15,9 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from tqdm import tqdm
 from configs.config import Config
+from core.utils import tokenize
 from llm.llm_model import LLM
 from pipeline.runners import (
     TranslationReconstructionRunner,
@@ -37,7 +39,7 @@ MODEL_NAME = "google/gemini-3.1-flash-lite"
 
 RECONSTRUCTION_VALIDATOR_BASE_URL = BASE_URL
 RECONSTRUCTION_VALIDATOR_API_KEY  = API_KEY
-RECONSTRUCTION_VALIDATOR_MODEL_NAME = "deepseek/deepseek-v4-flash"
+RECONSTRUCTION_VALIDATOR_MODEL_NAME = MODEL_NAME
 
 # BASE_URL="http://127.0.0.1:12345/v1"
 # MODEL_NAME="qwen3.6-27b@q6_k"
@@ -61,6 +63,84 @@ EXTRA_BODY = None
 ENABLE_VISUALIZATION = True
 SHOW_TQDM_BAR = True
 RECONSTRUCTION_VALIDATOR_WINDOW_SIZE = 3
+RECONSTRUCTION_TOKEN_WARNING_LIMIT = 200
+
+
+def _write_reconstruction_token_warning(message: str) -> None:
+    if SHOW_TQDM_BAR:
+        tqdm.write(message)
+    else:
+        print(message)
+
+
+def _summarize_token_counts(values: list[int]) -> dict[str, int | float]:
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+    return {
+        "n": n,
+        "min": sorted_values[0],
+        "p50": sorted_values[n // 2],
+        "mean": round(sum(sorted_values) / n, 1),
+        "p95": sorted_values[min(n - 1, int(n * 0.95))],
+        "max": sorted_values[-1],
+    }
+
+
+def collect_reconstruction_token_stats(current_task_units_by_output_path: dict[Path, set[tuple[str, str]]]) -> dict[str, list[int]]:
+    stats_by_lang: dict[str, list[int]] = {}
+    for output_path, current_task_units in current_task_units_by_output_path.items():
+        if not current_task_units:
+            continue
+        if not output_path.exists():
+            continue
+        with output_path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = PipelineRecord(**json.loads(line))
+                for tgt_lang_code, branch in sorted(record.target.languages.items()):
+                    if (record.uid, tgt_lang_code) not in current_task_units:
+                        continue
+                    reconstruction_text = branch.artifacts.reconstruction.text
+                    if not reconstruction_text:
+                        continue
+                    token_count = len(
+                        tokenize(
+                            language=tgt_lang_code,
+                            raw_text=reconstruction_text,
+                            indexing=False,
+                        )
+                    )
+                    stats_by_lang.setdefault(tgt_lang_code, []).append(token_count)
+                    if token_count > RECONSTRUCTION_TOKEN_WARNING_LIMIT:
+                        _write_reconstruction_token_warning(
+                            "TOKEN_COUNT_WARNING "
+                            f"pipeline=6 uid={record.uid} target={tgt_lang_code} "
+                            f"tokens={token_count} limit={RECONSTRUCTION_TOKEN_WARNING_LIMIT} "
+                            f"file={output_path}"
+                        )
+    return stats_by_lang
+
+
+def print_reconstruction_token_summary(stats_by_lang: dict[str, list[int]]) -> None:
+    print()
+    print("=== Pipeline 6: Reconstruction token statistics ===")
+    print("token_warning_limit:", RECONSTRUCTION_TOKEN_WARNING_LIMIT)
+    if not stats_by_lang:
+        print("No reconstruction text found.")
+        return
+    for lang_code in sorted(stats_by_lang):
+        summary = _summarize_token_counts(stats_by_lang[lang_code])
+        print(
+            f"{lang_code}: "
+            f"n={summary['n']} "
+            f"min={summary['min']} "
+            f"p50={summary['p50']} "
+            f"mean={summary['mean']} "
+            f"p95={summary['p95']} "
+            f"max={summary['max']}"
+        )
 
 def load_input_cache_by_shard() -> list[tuple[Path, list[PipelineRecord]]]:
     items: list[tuple[Path, list[PipelineRecord]]] = []
@@ -102,6 +182,7 @@ async def main() -> None:
     total_units = 0
     existing_finished = 0
     candidate_total = 0
+    current_task_units_by_output_path: dict[Path, set[tuple[str, str]]] = {}
     for input_cache_path, prerequisite_records in prerequisite_cache_parts:
         output_path = reconstruction_output_path_from_input_cache(OUTPUT_BASE, INPUT_CACHE_BASE, input_cache_path)
         existing_output_by_uid = load_pipeline_records_by_uid(output_path)
@@ -112,6 +193,11 @@ async def main() -> None:
             source_record = existing_record or record
             target_codes = reconstruction_runner._prerequisite_target_language_codes(source_record)
             total_units += len(target_codes)
+            pending_codes = reconstruction_runner._pending_target_language_codes(source_record)
+            if pending_codes:
+                current_task_units_by_output_path.setdefault(output_path, set()).update(
+                    (record.uid, code) for code in pending_codes
+                )
             if existing_record:
                 existing_finished += sum(
                     1
@@ -141,6 +227,7 @@ async def main() -> None:
     print("enable_visualization:", ENABLE_VISUALIZATION)
     print("show_tqdm_bar:", SHOW_TQDM_BAR)
     print("max_current_tasks:", MAX_CURRENT_TASKS)
+    print("reconstruction_token_warning_limit:", RECONSTRUCTION_TOKEN_WARNING_LIMIT)
     print()
 
     summaries = []
@@ -167,6 +254,7 @@ async def main() -> None:
         summaries.append(summary)
         output_paths.append(output_path)
 
+    reconstruction_token_stats = collect_reconstruction_token_stats(current_task_units_by_output_path)
     reconstruction_runner.close_progress()
     print_llm_pipeline_summary(
         title="Pipeline 6: Translation reconstruction",
@@ -174,6 +262,7 @@ async def main() -> None:
         output_paths=output_paths,
         stage="translation_reconstruction",
     )
+    print_reconstruction_token_summary(reconstruction_token_stats)
 
 
 if __name__ == "__main__":

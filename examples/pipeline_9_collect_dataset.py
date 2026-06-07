@@ -13,8 +13,11 @@ from pipeline.exporters import (
 )
 from pipeline.runners import load_pipeline_records_by_part_latest
 
+import os
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
 
-CACHE_ROOT          = Path(".") / "cache_test"
+# CACHE_ROOT          = Path(".") / "cache_test"
+CACHE_ROOT          = DATASET_ROOT / "cache"
 INPUT_CACHE_BASE    = CACHE_ROOT / "pipeline_8_target_centric_mapping_deepseek-v4-flash"
 OUTPUT_DATASET_ROOT = CACHE_ROOT / "pipeline_9_dataset"
 

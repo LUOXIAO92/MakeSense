@@ -46,7 +46,7 @@ You are given:
 - target tokens from the candidate reconstruction
 - the raw translation before reconstruction
 - the candidate reconstruction
-- one ORDER RISK region produced by source-window order analysis
+- ORDER RISK region produced by source-window order analysis
 
 Your task is to validate only the given ORDER RISK region.
 
@@ -1068,83 +1068,83 @@ class ReconstructionValidator:
         self.last_debug["regions"] = "\n\n".join(local_regions)
 
         semantic_errors: list[str] = []
-        order_risk_blocks: list[str] = []
+        order_risk_blocks: list[str] = [region.strip() for region in local_regions if region.strip()]
         validator_result_blocks: list[str] = []
         feedback_blocks: list[str] = []
-        for order_risk in local_regions:
-            semantic_exceptions: list[Exception] = []
-            order_risk_blocks.append(order_risk.strip())
-            base_user_prompt = render_reconstruction_semantic_check_input(
-                user_prompt_template=self.semantic_check_user_prompt_template,
-                source_language_name=source_language_name,
-                target_language_name=target_language_name,
-                source_windows=source_windows,
-                target_tokens=target_tokens,
-                raw_translation=raw_translation,
-                candidate_reconstruction=candidate_reconstruction,
-                order_risk=order_risk,
-            )
-            if not base_user_prompt:
-                self.last_debug["result"] = "Semantic check skipped: rendered user prompt is empty."
-                return None
-            for n_retry in range(self.max_retries + 1):
-                user_prompt = base_user_prompt
-                if semantic_exceptions:
-                    user_prompt = (
-                        _exception_rendering(semantic_exceptions)
-                        + f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
-                        + base_user_prompt
+        combined_order_risk = "\n\n".join(order_risk_blocks)
+        base_user_prompt = render_reconstruction_semantic_check_input(
+            user_prompt_template=self.semantic_check_user_prompt_template,
+            source_language_name=source_language_name,
+            target_language_name=target_language_name,
+            source_windows=source_windows,
+            target_tokens=target_tokens,
+            raw_translation=raw_translation,
+            candidate_reconstruction=candidate_reconstruction,
+            order_risk=combined_order_risk,
+        )
+        if not base_user_prompt:
+            self.last_debug["result"] = "Semantic check skipped: rendered user prompt is empty."
+            return None
+
+        semantic_exceptions: list[Exception] = []
+        for n_retry in range(self.max_retries + 1):
+            user_prompt = base_user_prompt
+            if semantic_exceptions:
+                user_prompt = (
+                    _exception_rendering(semantic_exceptions)
+                    + f"\nRETRY:{n_retry}/{self.max_retries}\n\n"
+                    + base_user_prompt
+                )
+            messages = [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": self.semantic_check_system_prompt}],
+                },
+                {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
+            ]
+            try:
+                response = await self.llm.chat(
+                    messages,
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    extra_body,
+                )
+                semantic_scratchpad, semantic_result = extract_reconstruction_check_raw_blocks(response.content)
+                raw_validator_output = semantic_result or response.content
+                if semantic_scratchpad:
+                    raw_validator_output = "\n".join(
+                        [
+                            "model scratchpad:",
+                            semantic_scratchpad,
+                            "",
+                            raw_validator_output,
+                        ]
                     )
-                messages = [
-                    {
-                        "role": "system",
-                        "content": [{"type": "text", "text": self.semantic_check_system_prompt}],
-                    },
-                    {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
-                ]
-                try:
-                    response = await self.llm.chat(
-                        messages,
-                        max_tokens,
-                        temperature,
-                        top_p,
-                        extra_body,
+                validator_result_blocks.append(raw_validator_output)
+                feedback = extract_rewrite_recommend_feedback_or_raise(
+                    response.content,
+                    target_tokens=target_tokens,
+                    target_language_code=target_language_code,
+                )
+                if feedback:
+                    semantic_errors.append(feedback)
+                    feedback_blocks.append(feedback)
+                break
+            except Exception as e:
+                semantic_exceptions.append(e)
+                if n_retry == self.max_retries:
+                    failed_feedback = _render_semantic_validator_failed_feedback(semantic_exceptions)
+                    semantic_errors.append(failed_feedback)
+                    feedback_blocks.append(failed_feedback)
+                    self.last_debug["order_risk"] = "\n\n".join(order_risk_blocks)
+                    self.last_debug["validator_result"] = "\n\n".join(
+                        validator_result_blocks + [f"Semantic checker failed: {e}"]
                     )
-                    semantic_scratchpad, semantic_result = extract_reconstruction_check_raw_blocks(response.content)
-                    raw_validator_output = semantic_result or response.content
-                    if semantic_scratchpad:
-                        raw_validator_output = "\n".join(
-                            [
-                                "model scratchpad:",
-                                semantic_scratchpad,
-                                "",
-                                raw_validator_output,
-                            ]
-                        )
-                    validator_result_blocks.append(raw_validator_output)
-                    feedback = extract_rewrite_recommend_feedback_or_raise(
-                        response.content,
-                        target_tokens=target_tokens,
-                        target_language_code=target_language_code,
-                    )
-                    if feedback:
-                        semantic_errors.append(feedback)
-                        feedback_blocks.append(feedback)
-                    break
-                except Exception as e:
-                    semantic_exceptions.append(e)
-                    if n_retry == self.max_retries:
-                        failed_feedback = _render_semantic_validator_failed_feedback(semantic_exceptions)
-                        semantic_errors.append(failed_feedback)
-                        feedback_blocks.append(failed_feedback)
-                        self.last_debug["order_risk"] = "\n\n".join(order_risk_blocks)
-                        self.last_debug["validator_result"] = "\n\n".join(
-                            validator_result_blocks + [f"Semantic checker failed: {e}"]
-                        )
-                        self.last_debug["feedback"] = "\n\n".join(feedback_blocks)
-                        self.last_debug["result"] = self.last_debug["validator_result"]
-                        return failed_feedback
-                    await asyncio.sleep(0.5 * (n_retry + 1))
+                    self.last_debug["feedback"] = "\n\n".join(feedback_blocks)
+                    self.last_debug["result"] = self.last_debug["validator_result"]
+                    return failed_feedback
+                await asyncio.sleep(0.5 * (n_retry + 1))
 
         self.last_debug["order_risk"] = "\n\n".join(order_risk_blocks)
         self.last_debug["validator_result"] = "\n\n".join(validator_result_blocks)

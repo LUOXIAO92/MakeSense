@@ -439,77 +439,72 @@ class TargetCentricMappingProvider(BaseProvider):
             target_senseunit_texts=target_senseunit_texts,
             source_token_texts=source_token_texts,
         )
-        semantic_errors: list[str] = []
-        for local_region in local_regions:
-            semantic_exceptions: list[Exception] = []
-            for n_retry in range(SEMANTIC_CHECK_MAX_RETRIES + 1):
-                semantic_user_prompt = render_level3_semantic_check_input(
-                    source_language_name=source_language_name,
-                    target_language_name=target_language_name,
-                    source_token_texts=source_token_texts,
-                    target_senseunit_texts=target_senseunit_texts,
-                    current_mapping=local_region,
-                )
-                semantic_messages = [
-                    {
-                        "role": "system",
-                        "content": [{"type": "text", "text": self.semantic_check_system_prompt}],
-                    },
-                    {
-                        "role": "user",
-                        "content": [{"type": "text", "text": semantic_user_prompt}],
-                    },
-                ]
-                if semantic_exceptions:
-                    exception_messages = exception_rendering(semantic_exceptions)
-                    if exception_messages.strip():
-                        semantic_messages = [
-                            semantic_messages[0],
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": exception_messages
-                                        + f"\nRETRY:{n_retry}/{SEMANTIC_CHECK_MAX_RETRIES}\n\n"
-                                        + semantic_user_prompt,
-                                    }
-                                ],
-                            },
-                        ]
-                try:
-                    semantic_response = await self.llm.chat(
-                        semantic_messages,
-                        max_tokens,
-                        temperature,
-                        top_p,
-                        extra_body,
-                    )
-                    semantic_error_feedback = extract_semantic_mapping_error_feedback_or_raise(
-                        semantic_response.content
-                    )
-                    if semantic_error_feedback:
-                        semantic_errors.append(semantic_error_feedback)
-                    break
-                except Exception as e:
-                    semantic_exceptions.append(e)
-                    if n_retry == SEMANTIC_CHECK_MAX_RETRIES:
-                        raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
-                        semantic_response_content = getattr(locals().get("semantic_response", None), "content", "")
-                        semantic_scratchpad, semantic_result = extract_semantic_check_raw_blocks(
-                            semantic_response_content
-                        )
-                        record.set_debug_target_centric_mapping(
-                            target_language_code,
-                            scratchpad=semantic_scratchpad,
-                            result=semantic_result or semantic_response_content,
-                            error=str(e),
-                        )
-                        return SEMANTIC_CHECK_UNVERIFIED_MAPPING_FEEDBACK
-                    await asyncio.sleep(0.5 * (n_retry + 1))
-        if not semantic_errors:
+        if not local_regions:
             return None
-        return "\n\n".join(semantic_errors)
+
+        current_mapping = "\n\n".join(local_regions)
+        semantic_user_prompt = render_level3_semantic_check_input(
+            source_language_name=source_language_name,
+            target_language_name=target_language_name,
+            source_token_texts=source_token_texts,
+            target_senseunit_texts=target_senseunit_texts,
+            current_mapping=current_mapping,
+        )
+        semantic_exceptions: list[Exception] = []
+        for n_retry in range(SEMANTIC_CHECK_MAX_RETRIES + 1):
+            semantic_messages = [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": self.semantic_check_system_prompt}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": semantic_user_prompt}],
+                },
+            ]
+            if semantic_exceptions:
+                exception_messages = exception_rendering(semantic_exceptions)
+                if exception_messages.strip():
+                    semantic_messages = [
+                        semantic_messages[0],
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": exception_messages
+                                    + f"\nRETRY:{n_retry}/{SEMANTIC_CHECK_MAX_RETRIES}\n\n"
+                                    + semantic_user_prompt,
+                                }
+                            ],
+                        },
+                    ]
+            try:
+                semantic_response = await self.llm.chat(
+                    semantic_messages,
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    extra_body,
+                )
+                return extract_semantic_mapping_error_feedback_or_raise(semantic_response.content)
+            except Exception as e:
+                semantic_exceptions.append(e)
+                if n_retry == SEMANTIC_CHECK_MAX_RETRIES:
+                    raise_unless_contract_or_validation_error(e, validation_error_types=ValidateExceptions)
+                    semantic_response_content = getattr(locals().get("semantic_response", None), "content", "")
+                    semantic_scratchpad, semantic_result = extract_semantic_check_raw_blocks(
+                        semantic_response_content
+                    )
+                    record.set_debug_target_centric_mapping(
+                        target_language_code,
+                        scratchpad=semantic_scratchpad,
+                        result=semantic_result or semantic_response_content,
+                        error=str(e),
+                    )
+                    return SEMANTIC_CHECK_UNVERIFIED_MAPPING_FEEDBACK
+                await asyncio.sleep(0.5 * (n_retry + 1))
+        return None
 
     def _validate_mapping_result(
         self,

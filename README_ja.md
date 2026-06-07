@@ -2,33 +2,33 @@
 
 # MakeSense: Sense Aware Simultaneous Speech Translation
 
-MakeSense は、同時音声翻訳モデル向けに sense-aware な学習データと検証パイプラインを作るための研究・データ生成プロジェクトです。ASR / 書き起こしタスクにも対応します。
+MakeSense は、同時音声翻訳モデル向けに意味単位を意識した学習データと検証パイプラインを作るための研究・データ生成プロジェクトです。ASR / 書き起こしタスクにも対応します。
 
 このプロジェクトでは、音声翻訳を逐次的なマルチターン対話として扱います。音声がチャンクごとに届き、モデルはその時点で原文の書き起こしを出すのか、訳文を出すのか、それとももう少し文脈を待つのかを学習します。
 
-現在のリポジトリでは、データセット構築 pipeline と学習データ生成ユーティリティを提供しています。ホットワード / 指定訳語のサポートと推論バックエンドは今後追加予定です。
+現在のリポジトリでは、データセット構築パイプラインと学習データ生成ユーティリティを提供しています。ホットワード / 指定訳語のサポートと推論バックエンドは今後追加予定です。
 
 ## プロジェクト概要
 
-目標：ASR / 書き起こし能力も持つ omni / multimodal model に、ストリーミング同時音声翻訳の振る舞いを学習させること。
+目標：ASR / 書き起こし能力も持つオムニ / マルチモーダルモデルに、ストリーミング同時音声翻訳の振る舞いを学習させること。
 
 本プロジェクトは以下の論文から着想を得ています。
 - 無限入力ウィンドウ / time-pressure 同時翻訳：[InfiniSST: Simultaneous Translation of Unbounded Speech with Large Language Model](https://arxiv.org/pdf/2503.02969)
 - sense-unit translation：[SIMULSENSE: SENSE-DRIVEN INTERPRETING FOR EFFICIENT SIMULTANEOUS SPEECH TRANSLATION](https://arxiv.org/abs/2509.21932)
 
 本プロジェクトでは：
-- sense-unit detector、audio encoder、LLM backbone alignment をゼロから学習することは**しません**。
+- 意味単位検出器、音声エンコーダー、LLM バックボーンアライメントをゼロから学習することは**しません**。
 - モデルアーキテクチャは**変更しません**。長時間のストリーミング翻訳は、実行時のスライディングウィンドウ型コンテキスト管理で扱います。
-- ground-truth に近いデータセットと pipeline 検証の仕組みを作り、omni model が同時翻訳の戦略を学習できるようにします。
+- 正解データに近いデータセットとパイプライン検証の仕組みを作り、オムニモデルが同時翻訳の戦略を学習できるようにします。
 
 ## 要件
 
-### Clone repository
+### リポジトリの取得
 ```bash
 git clone --recursive https://github.com/LUOXIAO92/MakeSense.git 
 ```
 
-### Python packages
+### Python パッケージ
 
 データセット準備用：
 - データセット準備には専用の Python 環境を使うことを推奨します。`qwen-asr` は新しい `transformers` と互換性がないため、学習用環境とは分けてください。
@@ -49,30 +49,46 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 ### サブモジュール依存
 - 単語アライナー：[TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
 - デフォルトのベースモデルには [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE) を使います。
-- マルチモーダル入力に対する assistant-only loss の構築には [MultimodalAssistantMask](https://github.com/LUOXIAO92/MultimodalAssistantMask.git) を使います。
+- マルチモーダル入力に対するアシスタント部分だけの損失の構築には [MultimodalAssistantMask](https://github.com/LUOXIAO92/MultimodalAssistantMask.git) を使います。
 
-## Pipeline
+## パイプライン
 
 ### 原言語 / 書き起こし側
-1. metadata から cache records を初期化
+1. メタデータからキャッシュレコードを初期化
 2. 必要に応じて ASR 書き起こし
-3. forced alignment
-4. time-pressure 原言語 sense-unit segmentation
+3. 強制アライメント
+4. 時間制約付きの原言語意味単位分割
 
 ### 目標言語 / 翻訳側
-1. raw translation
-2. translation reconstruction
-3. pure-text target sense-unit segmentation
-4. target-centric source mapping
-5. final dataset collection/export
+1. 生の訳文生成
+2. 翻訳再構成
+3. テキストのみの目標言語意味単位分割
+4. 目標側中心の原文マッピング
+5. 最終データセットの収集・書き出し
 
-## 使い方：データセット pipeline 全体を実行する
+### 時刻ずれとアライメント語のグループ化
 
-現在のワークフローは `examples/` 配下のステージスクリプトで実行します。各ステージは前段の cache を読み込み、新しいステージ cache を書き出します。既存の JSONL cache から続きを再開することもできます。
+強制アライメントモデルでは、発話末尾で時刻が少し後ろにずれることがあります。そのため、最後のいくつかのアライメント用トークンの終了時刻が実際の音声長を超える場合があります。
 
-実行前に、**各 example スクリプト冒頭の設定ブロック**を確認してください。よく使う項目には dataset/cache のパス、モデル名、対象言語、`TOP_P`、provider 固有の `EXTRA_BODY`、必要に応じて `ENABLE_VISUALIZATION` などがあります。
+MakeSense では、この末尾のずれを致命的なアライメントエラーではなく、想定される末尾のずれとして扱います。ストリーミング処理の出力窓は、実際の音声長と設定された窓幅によって定義されます。末尾のトークンが実際の音声長を超えている場合でも、下流段階ではそれらを最後の出力窓に含めます。そのため、この理由だけで追加の窓を作ったり、レコード全体を拒否したりはしません。
 
-`EXTRA_BODY` は OpenAI-compatible Chat Completions request にそのまま渡される、provider 固有の拡張パラメータです。`top_k` や thinking/reasoning の制御は provider によって schema が異なるため、以下では代表的な provider-specific 設定例を示します。
+ただし、この末尾ずれの許容は、強制アライメント出力内の時間因果チェックをなくすものではありません。隣接する元の時刻付きトークンは単調である必要があります。つまり、前のトークンの終了時刻が次のトークンの開始時刻より後になってはいけません。デフォルトでは、この隣接トークンの順序が壊れているレコードは拒否されます。Pipeline 4 には、小さな境界ずれに対する任意の修復スイッチもあり、デフォルトでは無効です。有効にした場合、`next.start < prev.end < next.end` の修復可能な重なりは `next.start = prev.end` によって修正されます。`prev.end == next.start == next.end` のように接しているゼロ長の次トークンは受け入れられます。一方、修正後に次のトークンがゼロ長または負の長さになる重なり（`prev.end >= next.end` かつ `prev.end > next.start`）は、そのレコードの検証失敗として拒否されます。他のレコードの処理は継続できます。
+
+学習データを作るとき、音声長が `window_count × window_size` より短い場合は、音声入力を対応する窓の長さまで補います。これにより、対話ターン、出力窓、音声チャンクの対応を保ちつつ、実際の音声長に基づく窓境界の意味を維持します。
+
+Pipeline 4 は、強制アライメントモデルが出した時刻付きトークンを `alignment.tokens` に保存します。また、分かち書き器がそれらのトークンを語にまとめたグループを `alignment.words` に保存します。後続段階はこの語を使います。Pipeline 8 の `source_token_ids` も、元の時刻付きトークンではなく、この語の番号を指します。
+
+このグループ化が必要になるのは、Qwen3-ForcedAligner が出すトークンの細かさと、後続段階で使う語の細かさが必ずしも一致しないためです。Qwen3-ForcedAligner では、中国語と韓国語は非常に細かく、実質的に文字単位に近い時刻付きトークンとして扱われます。そのため、分かち書き器が複数の文字または細かいトークンを、中国語の語や韓国語の空白 / 語節に近い語へまとめます。日本語は少し特殊です。Qwen3-ForcedAligner は日本語の時刻付きトークンを `nagisa` 分かち書き器で作りますが、MakeSense が `alignment.words` を作るときにはプロジェクト側で設定された別の分かち書き器を使うことがあります。そのため、日本語でも分かち書き境界の違いによって、複数の時刻付きトークンが一つの語にまとめられることがあります。
+
+これらのケースに対して、MakeSense は意図的に保守的な時刻の扱いを採用しています。ストリーミング同時翻訳では厳密な時間因果関係が必要なので、処理は一つの時刻付きトークンの時間軸を切り分けて、複数の語に人工的な細かい時刻を割り当てることはしません。代わりに、複数の時刻付きトークンが一つの語にまとめられる場合、その語は最初のトークンの開始時刻と最後のトークンの終了時刻を使います。これにより、不確かな人工的時間境界を作らず、ストリーミング出力の因果関係を壊さないようにしています。
+
+## 使い方：データセットパイプライン全体を実行する
+
+現在のワークフローは `examples/` 配下のステージスクリプトで実行します。各ステージは前段のキャッシュを読み込み、新しいステージキャッシュを書き出します。既存の JSONL キャッシュから続きを再開することもできます。
+
+実行前に、**各サンプルスクリプト冒頭の設定ブロック**を確認してください。よく使う項目にはデータセット / キャッシュのパス、モデル名、対象言語、`TOP_P`、提供サービス固有の `EXTRA_BODY`、必要に応じて `ENABLE_VISUALIZATION` などがあります。
+
+`EXTRA_BODY` は OpenAI 互換のチャット補完リクエストにそのまま渡される、提供サービス固有の拡張パラメータです。`top_k` や思考 / 推論まわりの制御は提供サービスによって形式が異なるため、以下では代表的なサービス別設定例を示します。
 
 ```python
 # vLLM / local OpenAI-compatible API の例:
@@ -92,23 +108,23 @@ EXTRA_BODY = {"thinking": {"type": "disabled"}}
 ### 現在使えるもの
 
 利用可能：
-- 最終 pipeline-9 JSONL export まで実行できるデータセット構築 pipeline。
+- 最終第 9 ステージの JSONL 書き出しまで実行できるデータセット構築パイプライン。
 - `src/data_loader` による、最終データセットからの学習サンプル構築。
-- `examples/train_lora.py` と `src/train` による初版 real-audio LoRA trainer。
+- `examples/train_lora.py` と `src/train` による初版の実音声 LoRA 学習用エントリ。
 
-TODO：
-- [x] **高優先度**：小さなサンプルで `examples/train_lora.py` を動かし、対話テンプレート、assistant-only loss、1〜2 step の学習が正しく動くことを確認する。
+今後の作業：
+- [x] **高優先度**：小さなサンプルで `examples/train_lora.py` を動かし、対話テンプレート、アシスタント部分だけの損失、1〜2 ステップの学習が正しく動くことを確認する。
 - [ ] **高優先度**：`google/gemma-4-E2B-it` の LoRA 学習を最後まで実行する。
-  - **Ongoing**：現在は、より大規模な学習データの整備を進めています。公開予定のデータセットには、約 8,000 件の音声・書き起こしサンプルと、翻訳方策を学習するためのマルチターン会話の軌跡データ約 24,000 件が含まれます。このデータは [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset) をもとに二次処理したものです。質の高い多言語音声データを公開してくださっている Emilia-Dataset プロジェクトに感謝します。
-- [ ] **次に高い優先度：** 学習済み streaming model を実行するための inference backend を追加する。
-  - **Ongoing**：推論側の実装は [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git) で進めています。
-- [ ] training / inference context 向けに hot words と hot translations のサポートを追加する。
+  - **進行中**：現在は、より大規模な学習データの整備を進めています。公開予定のデータセットには、約 8,000 件の音声・書き起こしサンプルと、翻訳方策を学習するためのマルチターン会話の軌跡データ約 24,000 件が含まれます。このデータは [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset) をもとに二次処理したものです。質の高い多言語音声データを公開してくださっている Emilia-Dataset プロジェクトに感謝します。
+- [ ] **次に高い優先度：** 学習済みストリーミングモデルを実行するための推論バックエンドを追加する。
+  - **進行中**：推論側の実装は [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git) で進めています。
+- [ ] 学習 / 推論コンテキスト向けにホットワードと指定訳語のサポートを追加する。
 
 ### LoRA 学習エントリ
 
-デフォルトの LoRA 学習例は `google/gemma-4-E2B-it` 向けです。Transformers のマルチモーダルモデルに PEFT LoRA を載せ、実音声チャンクを使って学習します。学習中の指標はプロジェクト側で管理する TensorBoard scalar ログに記録し、strict streaming test の指標も出力します。
+デフォルトの LoRA 学習例は `google/gemma-4-E2B-it` 向けです。Transformers のマルチモーダルモデルに PEFT LoRA を載せ、実音声チャンクを使って学習します。学習中の指標はプロジェクト側で管理する TensorBoard スカラー ログに記録し、厳密なストリーミングテストの指標も出力します。
 
-データセット、モデル、LoRA、checkpoint、モニタリング関連の設定は、次のスクリプト冒頭で変更できます。
+データセット、モデル、LoRA、チェックポイント、モニタリング関連の設定は、次のスクリプト冒頭で変更できます。
 
 ```text
 examples/train_lora.py
@@ -127,7 +143,7 @@ examples/train_lora.py
 PYTHONPATH=src python examples/train_lora.py
 ```
 
-LoRA adapter、checkpoint、monitoring ファイルは、設定した `OUTPUT_DIR` に書き込まれます。
+LoRA アダプタ、チェックポイント、監視ファイルは、設定した `OUTPUT_DIR` に書き込まれます。
 
 ```text
 outputs/makesense_lora/
@@ -139,12 +155,12 @@ outputs/makesense_lora/
 └── test_metrics.json
 ```
 
-strict streaming test では、各 assistant turn の生成時に、その時点までに到着している音声チャンクだけをモデルに渡します。評価に使うレコード数は `examples/train_lora.py` の `TEST_RECORD_COUNT` で指定します。`0` なら評価を行わず、`-1` なら test split 全体を使い、正の値ならその件数までを評価します。
+厳密なストリーミングテストでは、各アシスタントターンの生成時に、その時点までに到着している音声チャンクだけをモデルに渡します。評価に使うレコード数は `examples/train_lora.py` の `TEST_RECORD_COUNT` で指定します。`0` なら評価を行わず、`-1` ならテスト分割全体を使い、正の値ならその件数までを評価します。
 
 ### カスタマイズ
-pipeline レベルの非学習設定を調整する場合は、`src/configs/config.py` と `src/configs/LANGUAGE_PACK_*.py` を参照してください。主に、データのサンプリング範囲、対応言語、ASR / forced-alignment モデル、tokenizer、wait token、ストリーミング window size、最大 chunk size、reconstruction validator 用の high-noise tokens、各言語の language pack / few-shot examples などを設定できます。
+パイプラインレベルの非学習設定を調整する場合は、`src/configs/config.py` と `src/configs/LANGUAGE_PACK_*.py` を参照してください。主に、データのサンプリング範囲、対応言語、ASR / 強制アライメントモデル、トークナイザー、待機トークン、ストリーミング窓幅、最大チャンク長、再構成バリデーター用の高ノイズトークン、各言語の言語パック / 少数例 などを設定できます。
 
-### Pipeline の実行順序
+### パイプラインの実行順序
 
 各ステージは次の順序で実行します。
 
@@ -154,37 +170,37 @@ export PYTHONPATH=src
 # 1. 必要に応じて、データセットの元データをダウンロード / 準備します。（ここでは Emilia dataset を使います。https://huggingface.co/datasets/amphion/Emilia-Dataset を参照してください）
 python examples/pipeline_1_download_Emilia.py
 
-# 2. dataset metadata から PipelineRecord cache shards を初期化します。
+# 2. データセットメタデータから PipelineRecord のキャッシュシャードを初期化します。
 python examples/pipeline_2_initialize_cache.py
 
 # 3a-1. 推奨 ASR 経路。
-# source 側の書き起こし結果を cache に補完します。
+# 原文側の書き起こし結果をキャッシュに補完します。
 python examples/pipeline_3_a1_asr.py
 
-# 3a-2. 推奨される ASR ベースの raw translation 経路。
-# 実測では、中国語・日本語・韓国語のいずれでも、ASR の後に omni/audio-assisted translation で補正する方が、direct omni ASR より精度と安定性が高くなります。
+# 3a-2. 推奨される ASR ベースの原訳文生成経路。
+# 実測では、中国語・日本語・韓国語のいずれでも、ASR の後にオムニモデル / 音声補助翻訳で補正する方が、直接オムニ ASR より精度と安定性が高くなります。
 python examples/pipeline_3_a2_asr_text_translation.py
 
-# 3b. 任意の direct omni ASR + translation 経路。
-# one-pass multimodal translation の挙動を確認するときに使います。
+# 3b. 任意の直接オムニ ASR + 翻訳経路。
+# 1 回で行うマルチモーダル翻訳の挙動を確認するときに使います。
 python examples/pipeline_3_b_asr_translation_omni.py
 
-# 4. source transcription の forced alignment。
+# 4. 原文書き起こしの強制アライメント。
 python examples/pipeline_4_forced_alignment.py
 
-# 5. time-pressure source sense-unit segmentation。
+# 5. 時間制約付きの原文意味単位分割。
 python examples/pipeline_5_asr_segmentation.py
 
-# 6. translation reconstruction。
+# 6. 翻訳再構成。
 python examples/pipeline_6_translation_reconstruction.py
 
-# 7. pure-text target sense-unit segmentation。
+# 7. テキストのみの訳文意味単位分割。
 python examples/pipeline_7_pure_text_segmentation.py
 
-# 8. target sense units から source token ids への target-centric mapping。
+# 8. 目標言語の意味単位から原文トークン ID への目標側中心マッピング。
 python examples/pipeline_8_target_centric_mapping.py
 
-# 9. 完了済み pipeline-8 cache から最終データセットを収集 / export します。
+# 9. 完了済み第 8 ステージのキャッシュから最終データセットを収集 / 書き出します。
 python examples/pipeline_9_collect_dataset.py
 ```
 
@@ -204,7 +220,7 @@ python examples/pipeline_9_collect_dataset.py
 
 ### 最終データセット出力
 
-Pipeline 9 は次の構成で最終データセットを export します。
+Pipeline 9 は次の構成で最終データセットを書き出します。
 
 ```text
 path/to/output/dir/
@@ -225,11 +241,11 @@ path/to/output/dir/
     └── ...
 ```
 
-`dimensional_analysis/` は、翻訳段階で生成された文全体レベルの `target.shared.translation_analysis` を独立して export する領域です。transcription / translation のデータセット schema とは分けて保存されます。
+`dimensional_analysis/` は、翻訳段階で生成された文全体レベルの `target.shared.translation_analysis` を独立して書き出す領域です。書き起こし / 翻訳のデータセット構造とは分けて保存されます。
 
 ## 出力形式
 
-### Streaming model output
+### ストリーミングモデルの出力
 
 ```text
 <src>(transcription text)</src><tgt>(target translation text)</tgt>
@@ -237,7 +253,7 @@ path/to/output/dir/
 
 原言語の書き起こしや目標言語の翻訳を安定して出すには情報が足りない場合、モデルは `<|wait|>` を出力できます。
 
-### Conversation format
+### 対話形式
 
 ```text
 system
@@ -254,9 +270,9 @@ assistant
 ...
 ```
 
-## Small-scale validation results (`google/gemma-4-E2B-it`, `train_examples: 96`):
+## 小規模検証結果 (`google/gemma-4-E2B-it`, `train_examples: 96`):
 
-### Training paramenters
+### 学習パラメータ
 
 ```text
 Dataset
@@ -289,81 +305,81 @@ Hyper Parmeters
   - NUM_TRAIN_EPOCHS: 20
 ```
 
-### Results
+### 結果
 
-#### Metrics
+#### 指標
 
-ここで示す strict streaming test の指標は、主にストリーミング対話における出力形式とリリース判断を確認するためのものです。具体的には、出力が `<src>...</src><tgt>...</tgt>` のプロトコルに従っているか、生成が想定した stop token で止まっているか、各 assistant turn で source / target 側が待つべきか内容を出すべきかを見ています。ASR の文字単位の正確さや、翻訳の意味的な品質を直接測る指標ではありません。
+ここで示す厳密なストリーミングテストの指標は、主にストリーミング対話における出力形式とリリース判断を確認するためのものです。具体的には、出力が `<src>...</src><tgt>...</tgt>` のプロトコルに従っているか、生成が想定した停止トークンで止まっているか、各アシスタントターンで原文側 / 訳文側が待つべきか内容を出すべきかを見ています。ASR の文字単位の正確さや、翻訳の意味的な品質を直接測る指標ではありません。
 
 **POSTPROCESSED_TURN_STOP_RATE**
 
 - 意味：後処理後の出力が、余計な文字列を含まない完全なプロトコル出力になっている割合です。
-- 計算：`postprocessed_turn_stop_turns / TURN_COUNT`。後処理後のテキストがプロトコルとして正しく、正規化された `<src>...</src><tgt>...</tgt>` 出力と一致する turn を成功として数えます。
+- 計算：`postprocessed_turn_stop_turns / TURN_COUNT`。後処理後のテキストがプロトコルとして正しく、正規化された `<src>...</src><tgt>...</tgt>` 出力と一致するターンを成功として数えます。
 
 **PROTOCOL_VALID_RATE**
 
 - 意味：モデル出力が指定されたプロトコルに従っている割合です。
-- 計算：`protocol_valid_turns / TURN_COUNT`。出力は `<src>...</src><tgt>...</tgt>` に一致する必要があり、source / target の中に `<src>`、`</src>`、`<tgt>`、`</tgt>` などのタグが入れ子で含まれていてはいけません。
+- 計算：`protocol_valid_turns / TURN_COUNT`。出力は `<src>...</src><tgt>...</tgt>` に一致する必要があり、原文側 / 訳文側の中に `<src>`、`</src>`、`<tgt>`、`</tgt>` などのタグが入れ子で含まれていてはいけません。
 
 **RAW_TURN_STOP_RATE**
 
-- 意味：raw decode された生成結果が、設定された generation stop token で正しく止まっている割合です。
-- 計算：`raw_turn_stop_turns / TURN_COUNT`。raw output が postprocessed output の直後に `generation_stop` を続けている場合、その turn は正しく停止したものとして扱います。
+- 意味：生のデコード結果が、設定された生成停止トークンで正しく止まっている割合です。
+- 計算：`raw_turn_stop_turns / TURN_COUNT`。生の出力が後処理後の出力の直後に `generation_stop` を続けている場合、そのターンは正しく停止したものとして扱います。
 
 **RECORD_COUNT**
 
-- 意味：今回の strict streaming test で実際に評価した test record の数です。
+- 意味：今回の厳密なストリーミングテストで実際に評価したテストレコードの数です。
 - 計算：`len(records)`。
 
 **SRC_RELEASE_ACCURACY**
 
-- 意味：ground truth で source 側が転写テキストを出すべき turn のうち、モデルも source 側で内容を出した割合です。
-- 計算：`src_release_correct / SRC_RELEASE_TOTAL`。ここでは `<src>...</src>` が wait ではないかだけを見ており、出力された転写テキストそのものが正しいかは評価しません。
+- 意味：正解データで原文側が書き起こしテキストを出すべきターンのうち、モデルも原文側で内容を出した割合です。
+- 計算：`src_release_correct / SRC_RELEASE_TOTAL`。ここでは `<src>...</src>` が待機ではないかだけを見ており、出力された転写テキストそのものが正しいかは評価しません。
 
 **SRC_RELEASE_TOTAL**
 
-- 意味：ground truth で source 側が内容を出すべき turn の数です。
-- 計算：ground truth の `<src>...</src>` が `<|wait|>` ではない turn を数えます。
+- 意味：正解データで原文側が内容を出すべきターンの数です。
+- 計算：正解データの `<src>...</src>` が `<|wait|>` ではないターンを数えます。
 
 **SRC_WAIT_ACCURACY**
 
-- 意味：ground truth で source 側が待つべき turn のうち、モデルも source 側で wait を出した割合です。
+- 意味：正解データで原文側が待つべきターンのうち、モデルも原文側で待機を出した割合です。
 - 計算：`src_wait_correct / SRC_WAIT_TOTAL`。モデルの `<src>...</src>` が `<|wait|>` かどうかだけを見ます。
 
 **SRC_WAIT_TOTAL**
 
-- 意味：ground truth で source 側が待つべき turn の数です。
-- 計算：ground truth の `<src>...</src>` が、前後の空白を除いたうえで `<|wait|>` と完全に一致する turn を数えます。
+- 意味：正解データで原文側が待つべきターンの数です。
+- 計算：正解データの `<src>...</src>` が、前後の空白を除いたうえで `<|wait|>` と完全に一致するターンを数えます。
 
 **TGT_RELEASE_ACCURACY**
 
-- 意味：ground truth で target 側が翻訳を出すべき turn のうち、モデルも target 側で内容を出した割合です。
-- 計算：`tgt_release_correct / TGT_RELEASE_TOTAL`。ここでは `<tgt>...</tgt>` が wait ではないかだけを見ており、出力された翻訳の意味的な正しさは評価しません。
+- 意味：正解データで訳文側が翻訳を出すべきターンのうち、モデルも訳文側で内容を出した割合です。
+- 計算：`tgt_release_correct / TGT_RELEASE_TOTAL`。ここでは `<tgt>...</tgt>` が待機ではないかだけを見ており、出力された翻訳の意味的な正しさは評価しません。
 
 **TGT_RELEASE_TOTAL**
 
-- 意味：ground truth で target 側が翻訳を出すべき turn の数です。
-- 計算：ground truth の `<tgt>...</tgt>` が `<|wait|>` ではない turn を数えます。
+- 意味：正解データで訳文側が翻訳を出すべきターンの数です。
+- 計算：正解データの `<tgt>...</tgt>` が `<|wait|>` ではないターンを数えます。
 
 **TGT_WAIT_ACCURACY**
 
-- 意味：ground truth で target 側が待つべき turn のうち、モデルも target 側で wait を出した割合です。
+- 意味：正解データで訳文側が待つべきターンのうち、モデルも訳文側で待機を出した割合です。
 - 計算：`tgt_wait_correct / TGT_WAIT_TOTAL`。モデルの `<tgt>...</tgt>` が `<|wait|>` かどうかだけを見ます。
 
 **TGT_WAIT_TOTAL**
 
-- 意味：ground truth で target 側が待つべき turn の数です。
-- 計算：ground truth の `<tgt>...</tgt>` が、前後の空白を除いたうえで `<|wait|>` と完全に一致する turn を数えます。
+- 意味：正解データで訳文側が待つべきターンの数です。
+- 計算：正解データの `<tgt>...</tgt>` が、前後の空白を除いたうえで `<|wait|>` と完全に一致するターンを数えます。
 
 **TURN_COUNT**
 
-- 意味：選択されたすべての test record で、実際に評価した assistant turn の総数です。
-- 計算：`records` に含まれる、生成・評価対象となった assistant 出力をすべて合計します。
+- 意味：選択されたすべてのテストレコードで、実際に評価したアシスタントターンの総数です。
+- 計算：`records` に含まれる、生成・評価対象となったアシスタント出力をすべて合計します。
 
-#### Test Outputs - step 50
+#### ステップ 50 のテスト出力
 
-- tolerance window size: 1.0 s
-- 以下は小規模テストの結果です。左側が ground truth、右側がモデル出力です。
+- 許容窓幅：1.0 秒
+- 以下は小規模テストの結果です。左側が正解データ、右側がモデル出力です。
 
 ```text
 Test Metrics
@@ -523,7 +539,7 @@ Test Metrics
 ```
 
 
-#### Final Test Outputs - step 240
+#### ステップ 240 の最終テスト出力
 
 ```text
 Test Metrics

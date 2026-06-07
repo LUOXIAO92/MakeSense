@@ -11,7 +11,7 @@ from typing import Optional
 
 from tqdm import tqdm
 
-from core.build_conversation import build_asr_blocks, build_translation_blocks
+from core.build_conversation import build_asr_blocks, build_translation_blocks, count_max_empty_translation_windows
 from core.schema import MetaData, Transcription, Translation
 from core.utils import apply_mapping_groups, build_transcription_chunks, group_tokens_by_sense_units, process_words, render_transcription_chunk_word_indices, tokenize
 from pipeline.schema import PipelineRecord
@@ -1174,13 +1174,13 @@ def visualization_target_centric_mapping(record: PipelineRecord, target_language
             mappings=list(target.artifacts.tgt_src_mapping.mappings),
             author=target.artifacts.tgt_src_mapping.author,
         )
-        translation_blocks, max_empty_window_count = build_translation_blocks(
+        translation_blocks = build_translation_blocks(
             record.metadata,
             debug_transcription,
             debug_translation,
-            tolerance_window=0,
             debug=True,
         )
+        max_empty_window_count = count_max_empty_translation_windows(translation_blocks)
 
     combined_blocks: list[str] = []
     for idx in range(max(len(asr_blocks), len(translation_blocks))):

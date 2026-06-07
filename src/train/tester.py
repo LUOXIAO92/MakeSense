@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -65,6 +66,33 @@ def move_tensor_batch_to_device(batch: dict[str, Any], device: torch.device) -> 
     return {key: value.to(device) if isinstance(value, torch.Tensor) else value for key, value in batch.items()}
 
 
+def _pop_training_only_processor_keys(batch: dict[str, Any]) -> dict[str, Any]:
+    batch.pop("labels", None)
+    batch.pop("assistant_masks", None)
+    batch.pop("completion_mask", None)
+    batch.pop("assistant_tokens_mask", None)
+    return batch
+
+
+def _past_key_values_from_output(output: Any) -> Any:
+    past_key_values = getattr(output, "past_key_values", None)
+    if past_key_values is None and isinstance(output, dict):
+        past_key_values = output.get("past_key_values")
+    if past_key_values is None:
+        raise ValueError("Model output does not contain past_key_values for prefill-cache reuse")
+    return past_key_values
+
+
+@dataclass(frozen=True)
+class PromptPrefillCacheState:
+    """KV cache plus exact rendered/token/audio prefix represented by it."""
+
+    rendered_text: str
+    input_ids: torch.Tensor
+    audio_slots: int
+    past_key_values: Any
+
+
 class StreamingSampleTester:
     """Evaluate test rows with strict streaming audio exposure and protocol metrics."""
 
@@ -110,6 +138,13 @@ class StreamingSampleTester:
 
     @torch.no_grad()
     def generate_records(self, *, model: Any, step: int, metrics: dict[str, Any]) -> list[dict[str, Any]]:
+        """Generate selected records without prompt-prefill reuse.
+
+        This method is kept as a backup/debug baseline only. Normal training
+        monitoring uses ``generate_records_with_prefill_cache(...)`` directly;
+        switch to this method in code only when debugging the prefill path.
+        """
+
         records: list[dict[str, Any]] = []
         was_training = bool(model.training)
         model.eval()
@@ -132,16 +167,29 @@ class StreamingSampleTester:
         example = row["example"]
         messages: list[ChatMessage] = row["messages"]
         system_prompt = str(messages[0]["content"])
+        assistant_indices = assistant_turn_indices(messages)
         audio_chunks = self.collator._audio_chunks_for_example(example)
         outputs: list[dict[str, str]] = []
+        rollout_messages: list[ChatMessage] = [messages[0]]
 
-        for assistant_index in assistant_turn_indices(messages):
-            prefix_messages = messages[:assistant_index]
+        for turn_number, assistant_index in enumerate(assistant_indices, start=1):
+            user_index = assistant_index - 1
+            if user_index <= 0 or messages[user_index]["role"] != "user":
+                raise ValueError(
+                    f"Expected user message before assistant turn {turn_number} for {example.uid}"
+                )
+            rollout_messages.append(messages[user_index])
             ground_truth = str(messages[assistant_index]["content"])
             raw_output, postprocessed_output = self.generate_turn_text(
                 model=model,
-                prefix_messages=prefix_messages,
+                prefix_messages=rollout_messages,
                 audio_chunks=audio_chunks,
+            )
+            rollout_messages.append(
+                {
+                    "role": "assistant",
+                    "content": postprocessed_output,
+                }
             )
             protocol = parse_protocol_output(postprocessed_output)
             outputs.append(
@@ -201,12 +249,372 @@ class StreamingSampleTester:
         )
         return raw_output, postprocessed_output
 
-    def evaluate(self, *, model: Any, step: int, metrics: dict[str, Any]) -> dict[str, Any]:
-        records = self.generate_records(model=model, step=step, metrics=metrics)
+    @torch.no_grad()
+    def generate_records_with_prefill_cache(
+        self,
+        *,
+        model: Any,
+        step: int,
+        metrics: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Generate selected records with experimental cross-turn prompt prefill reuse.
+
+        This is the normal training-monitoring path. ``generate_records`` is
+        retained only as a backup/debug baseline. The method keeps the same
+        real-rollout semantics: generated assistant text is appended to the
+        conversation before exposing the next audio turn.
+        """
+
+        records: list[dict[str, Any]] = []
+        was_training = bool(model.training)
+        model.eval()
+        try:
+            for row in self.selected_rows():
+                records.append(
+                    self._generate_record_for_row_with_prefill_cache(
+                        model=model,
+                        row=row,
+                        step=step,
+                        metrics=metrics,
+                    )
+                )
+        finally:
+            if was_training:
+                model.train()
+        return records
+
+    def _generate_record_for_row_with_prefill_cache(
+        self,
+        *,
+        model: Any,
+        row: dict[str, Any],
+        step: int,
+        metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Generate one record with real rollout and reusable prompt KV cache."""
+
+        example = row["example"]
+        messages: list[ChatMessage] = row["messages"]
+        system_prompt = str(messages[0]["content"])
+        assistant_indices = assistant_turn_indices(messages)
+        audio_chunks = self.collator._audio_chunks_for_example(example)
+        outputs: list[dict[str, str]] = []
+        rollout_messages: list[ChatMessage] = [messages[0]]
+        cache_state: PromptPrefillCacheState | None = None
+
+        for turn_number, assistant_index in enumerate(assistant_indices, start=1):
+            user_index = assistant_index - 1
+            if user_index <= 0 or messages[user_index]["role"] != "user":
+                raise ValueError(
+                    f"Expected user message before assistant turn {turn_number} for {example.uid}"
+                )
+            rollout_messages.append(messages[user_index])
+            ground_truth = str(messages[assistant_index]["content"])
+            raw_output, postprocessed_output = self.generate_turn_text_with_prefill_cache(
+                model=model,
+                prefix_messages=rollout_messages,
+                audio_chunks=audio_chunks,
+                cache_state=cache_state,
+            )
+            rollout_messages.append(
+                {
+                    "role": "assistant",
+                    "content": postprocessed_output,
+                }
+            )
+            cache_state = self.prefill_prompt_cache_for_messages(
+                model=model,
+                messages=rollout_messages,
+                audio_chunks=audio_chunks,
+                add_generation_prompt=False,
+                cache_state=cache_state,
+            )
+            protocol = parse_protocol_output(postprocessed_output)
+            outputs.append(
+                {
+                    "ground_truth": ground_truth,
+                    "raw_output": raw_output,
+                    "postprocessed_output": postprocessed_output,
+                    "extracted_protocol_output": protocol["normalized_output"],
+                    "protocol_valid": protocol["valid"],
+                    "raw_turn_stopped": raw_turn_stopped(raw_output, postprocessed_output, self.generation_stop),
+                    "postprocessed_turn_stopped": postprocessed_turn_stopped(postprocessed_output, protocol),
+                }
+            )
+
+        return {
+            "step": step,
+            "metrics": metrics,
+            "uid": str(example.uid),
+            "system_prompt": system_prompt,
+            "outputs": outputs,
+        }
+
+    def generate_turn_text_with_prefill_cache(
+        self,
+        *,
+        model: Any,
+        prefix_messages: list[ChatMessage],
+        audio_chunks: list[torch.Tensor],
+        cache_state: PromptPrefillCacheState | None,
+    ) -> tuple[str, str]:
+        """Generate one turn by reusing cached prompt prefill when possible.
+
+        ``cache_state`` must describe the exact text/token/audio prefix
+        represented by its ``past_key_values``. The method validates both the
+        rendered-string prefix and token prefix, then processor-encodes only the
+        newly appended rendered suffix with only newly exposed audio chunks. A
+        mismatch is treated as an error rather than silently falling back,
+        because silent fallback would make benchmark timing ambiguous.
+        """
+
+        full_batch, full_input_ids, slot_count, full_rendered = self._processor_batch_for_messages(
+            messages=prefix_messages,
+            audio_chunks=audio_chunks,
+            add_generation_prompt=True,
+        )
+        suffix_batch, suffix_input_ids, prefix_length = self._suffix_batch_for_cache_state(
+            full_batch=full_batch,
+            full_input_ids=full_input_ids,
+            full_rendered=full_rendered,
+            full_audio_slots=slot_count,
+            all_audio_chunks=audio_chunks,
+            cache_state=cache_state,
+        )
+        if int(suffix_input_ids.shape[1]) <= 0:
+            raise ValueError("Prefill-cache generation requires a non-empty prompt suffix")
+        suffix_batch = move_tensor_batch_to_device(suffix_batch, model_device(model))
+        if cache_state is not None:
+            suffix_batch["past_key_values"] = cache_state.past_key_values
+        generated = model.generate(
+            **suffix_batch,
+            max_new_tokens=self.test_max_new_tokens,
+            use_cache=True,
+            return_dict_in_generate=True,
+            output_scores=False,
+        )
+        sequences = getattr(generated, "sequences", generated)
+        if not isinstance(sequences, torch.Tensor):
+            raise ValueError("model.generate did not return tensor sequences for prefill-cache generation")
+        output_ids = self._extract_generated_suffix_output_ids(
+            sequences=sequences,
+            full_input_ids=full_input_ids.to(sequences.device),
+            suffix_input_ids=suffix_input_ids.to(sequences.device),
+        )
+        raw_output = decode_raw_generated_text(self.processor, output_ids)
+        postprocessed_output = decode_generated_text(
+            self.processor,
+            output_ids,
+            generation_stop=self.generation_stop,
+        )
+        return raw_output, postprocessed_output
+
+    def prefill_prompt_cache_for_messages(
+        self,
+        *,
+        model: Any,
+        messages: list[ChatMessage],
+        audio_chunks: list[torch.Tensor],
+        add_generation_prompt: bool,
+        cache_state: PromptPrefillCacheState | None,
+    ) -> PromptPrefillCacheState:
+        """Return KV cache for the canonical rendered prompt for ``messages``."""
+
+        full_batch, full_input_ids, slot_count, full_rendered = self._processor_batch_for_messages(
+            messages=messages,
+            audio_chunks=audio_chunks,
+            add_generation_prompt=add_generation_prompt,
+        )
+        suffix_batch, suffix_input_ids, prefix_length = self._suffix_batch_for_cache_state(
+            full_batch=full_batch,
+            full_input_ids=full_input_ids,
+            full_rendered=full_rendered,
+            full_audio_slots=slot_count,
+            all_audio_chunks=audio_chunks,
+            cache_state=cache_state,
+        )
+        if int(suffix_input_ids.shape[1]) <= 0:
+            if cache_state is None:
+                raise ValueError("Initial prompt prefill cache update requires a non-empty prompt")
+            return cache_state
+        if prefix_length == int(full_input_ids.shape[1]) and cache_state is not None:
+            return cache_state
+        if prefix_length > 0 and cache_state is None:
+            raise ValueError("Internal error: non-zero cached prefix without cache state")
+        if prefix_length == int(full_input_ids.shape[1]):
+            raise ValueError("Prompt prefill cache update requires a non-empty suffix")
+        suffix_batch = move_tensor_batch_to_device(suffix_batch, model_device(model))
+        if cache_state is not None:
+            suffix_batch["past_key_values"] = cache_state.past_key_values
+        output = model(
+            **suffix_batch,
+            use_cache=True,
+            return_dict=True,
+        )
+        return PromptPrefillCacheState(
+            rendered_text=full_rendered,
+            input_ids=full_input_ids.detach().cpu(),
+            audio_slots=slot_count,
+            past_key_values=_past_key_values_from_output(output),
+        )
+
+    def _processor_batch_for_messages(
+        self,
+        *,
+        messages: list[ChatMessage],
+        audio_chunks: list[torch.Tensor],
+        add_generation_prompt: bool,
+    ) -> tuple[dict[str, Any], torch.Tensor, int, str]:
+        slot_count = audio_slot_count(messages)
+        rendered = render_chat(
+            self.processor,
+            messages,
+            add_generation_prompt=add_generation_prompt,
+            enable_thinking=self.enable_thinking,
+        )
+        batch = self.collator._call_processor(rendered_texts=[rendered], flat_audio_chunks=audio_chunks[:slot_count])
+        batch = _pop_training_only_processor_keys(batch)
+        input_ids = batch.get("input_ids")
+        if not isinstance(input_ids, torch.Tensor):
+            raise ValueError("Processor output does not contain tensor input_ids for prefill-cache generation")
+        if int(input_ids.shape[0]) != 1:
+            raise ValueError("Prefill-cache tester only supports one generated sample at a time")
+        return batch, input_ids.detach().cpu(), slot_count, rendered
+
+    def _processor_batch_for_rendered_suffix(
+        self,
+        *,
+        rendered_suffix: str,
+        audio_chunks: list[torch.Tensor],
+        full_attention_mask: torch.Tensor | None,
+    ) -> tuple[dict[str, Any], torch.Tensor]:
+        batch = self.collator._call_processor(rendered_texts=[rendered_suffix], flat_audio_chunks=audio_chunks)
+        batch = _pop_training_only_processor_keys(batch)
+        input_ids = batch.get("input_ids")
+        if not isinstance(input_ids, torch.Tensor):
+            raise ValueError("Processor output does not contain tensor input_ids for prefill-cache suffix")
+        if int(input_ids.shape[0]) != 1:
+            raise ValueError("Prefill-cache suffix processor only supports batch size 1")
+        if full_attention_mask is not None:
+            batch["attention_mask"] = full_attention_mask
+        return batch, input_ids.detach().cpu()
+
+    def _suffix_batch_for_cache_state(
+        self,
+        *,
+        full_batch: dict[str, Any],
+        full_input_ids: torch.Tensor,
+        full_rendered: str,
+        full_audio_slots: int,
+        all_audio_chunks: list[torch.Tensor],
+        cache_state: PromptPrefillCacheState | None,
+    ) -> tuple[dict[str, Any], torch.Tensor, int]:
+        if cache_state is None:
+            input_ids = full_batch.get("input_ids")
+            if not isinstance(input_ids, torch.Tensor):
+                raise ValueError("Processor output does not contain tensor input_ids")
+            return full_batch, input_ids.detach().cpu(), 0
+
+        prefix_length = self._validate_cached_prefix(
+            full_input_ids=full_input_ids,
+            cache_state=cache_state,
+        )
+        if full_audio_slots < cache_state.audio_slots:
+            raise ValueError(
+                f"Cached audio slots exceed current prompt audio slots: "
+                f"cached={cache_state.audio_slots}, current={full_audio_slots}"
+            )
+        if not full_rendered.startswith(cache_state.rendered_text):
+            raise ValueError("Cached rendered prompt is not a string prefix of the current rendered prompt")
+        rendered_suffix = full_rendered[len(cache_state.rendered_text):]
+        suffix_audio_chunks = all_audio_chunks[cache_state.audio_slots:full_audio_slots]
+        full_attention_mask = full_batch.get("attention_mask")
+        full_attention_mask = full_attention_mask if isinstance(full_attention_mask, torch.Tensor) else None
+        suffix_batch, suffix_input_ids = self._processor_batch_for_rendered_suffix(
+            rendered_suffix=rendered_suffix,
+            audio_chunks=suffix_audio_chunks,
+            full_attention_mask=full_attention_mask,
+        )
+        reconstructed = torch.cat([cache_state.input_ids.detach().cpu(), suffix_input_ids], dim=1)
+        if not torch.equal(reconstructed, full_input_ids.detach().cpu()):
+            raise ValueError(
+                "Rendered suffix tokenization does not reconstruct the full prompt token ids; "
+                "cannot safely reuse multimodal prefill cache"
+            )
+        return suffix_batch, suffix_input_ids, prefix_length
+
+    @staticmethod
+    def _validate_cached_prefix(
+        *,
+        full_input_ids: torch.Tensor,
+        cache_state: PromptPrefillCacheState,
+    ) -> int:
+        cached_prompt_ids = cache_state.input_ids.detach().cpu()
+        full_input_ids = full_input_ids.detach().cpu()
+        if int(cached_prompt_ids.shape[0]) != 1 or int(full_input_ids.shape[0]) != 1:
+            raise ValueError("Prefill-cache prefix validation expects batch size 1")
+        prefix_length = int(cached_prompt_ids.shape[1])
+        full_length = int(full_input_ids.shape[1])
+        if prefix_length > full_length:
+            raise ValueError(
+                f"Cached prompt is longer than full prompt: cached={prefix_length}, full={full_length}"
+            )
+        if prefix_length and not torch.equal(cached_prompt_ids[:, :prefix_length], full_input_ids[:, :prefix_length]):
+            raise ValueError(
+                "Cached prompt tokens are not an exact prefix of the freshly rendered prompt; "
+                "cannot safely reuse prefill cache"
+            )
+        return prefix_length
+
+    @staticmethod
+    def _slice_batch_for_cached_suffix(
+        *,
+        full_batch: dict[str, Any],
+        full_sequence_length: int,
+        prefix_length: int,
+    ) -> dict[str, Any]:
+        suffix_batch: dict[str, Any] = {}
+        for key, value in full_batch.items():
+            if not isinstance(value, torch.Tensor):
+                suffix_batch[key] = value
+                continue
+            if value.ndim >= 2 and int(value.shape[0]) == 1 and int(value.shape[1]) == full_sequence_length:
+                if key == "attention_mask":
+                    suffix_batch[key] = value
+                else:
+                    suffix_batch[key] = value[:, prefix_length:]
+            else:
+                suffix_batch[key] = value
+        return suffix_batch
+
+    @staticmethod
+    def _extract_generated_suffix_output_ids(
+        *,
+        sequences: torch.Tensor,
+        full_input_ids: torch.Tensor,
+        suffix_input_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        suffix_length = int(suffix_input_ids.shape[1])
+        full_length = int(full_input_ids.shape[1])
+        if int(sequences.shape[1]) >= suffix_length and torch.equal(sequences[:, :suffix_length], suffix_input_ids):
+            return sequences[:, suffix_length:]
+        if int(sequences.shape[1]) >= full_length and torch.equal(sequences[:, :full_length], full_input_ids):
+            return sequences[:, full_length:]
+        raise ValueError("Generated sequence does not preserve expected prompt/suffix prefix")
+
+    def evaluate(
+        self,
+        *,
+        model: Any,
+        step: int,
+        metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        records = self.generate_records_with_prefill_cache(model=model, step=step, metrics=metrics)
         summary_metrics = summarize_test_records(records)
         return {
             "step": step,
             "metrics": metrics,
+            "test_use_prefill_cache": True,
             "test_metrics": summary_metrics,
             "total_available_test_rows": self.total_available_rows(),
             "selected_test_rows": self.selected_count(),

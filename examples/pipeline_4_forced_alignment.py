@@ -12,6 +12,7 @@ warnings.filterwarnings("ignore", message=r"The value of the smallest subnormal.
 import os
 import asyncio
 from pathlib import Path
+from tqdm import tqdm
 from configs.config import Config
 from pipeline.providers import Qwen3ForcedAlignment, WhisperXForcedAlignment
 from pipeline.runners import ForcedAlignmentRunner, load_pipeline_records_by_part_latest
@@ -33,6 +34,77 @@ SHOW_TQDM_BAR = True
 ENABLE_VISUALIZATION = True
 BATCH_SIZE = 32
 ALIGN_PROVIDER = "qwen3"  # "qwen3" | "whisperx"
+REPAIR_RAW_TOKEN_TIMING_OVERLAP = False  # Default/recommended: False. If True, repair only recoverable adjacent-token boundary drift.
+
+
+def _write_alignment_duration_notice(message: str) -> None:
+    if SHOW_TQDM_BAR:
+        tqdm.write(message)
+    else:
+        print(message)
+
+
+def collect_alignment_duration_notices(
+    *,
+    output_path: Path,
+    current_task_uids: set[str],
+) -> list[dict[str, object]]:
+    notices: list[dict[str, object]] = []
+    if not current_task_uids or not output_path.exists():
+        return notices
+
+    output_by_uid = load_pipeline_records_by_uid(output_path)
+    for uid in sorted(current_task_uids):
+        record = output_by_uid.get(uid)
+        if record is None:
+            continue
+        alignment = record.source.artifacts.alignment
+        if alignment is None or not alignment.tokens:
+            continue
+        last_token = alignment.tokens[-1]
+        last_end = float(last_token.end)
+        duration = float(record.metadata.duration)
+        if last_end <= duration:
+            continue
+        notice = {
+            "uid": record.uid,
+            "source_language": record.metadata.language,
+            "last_token": last_token.word,
+            "last_end": last_end,
+            "duration": duration,
+            "delta": last_end - duration,
+            "file": str(output_path),
+        }
+        notices.append(notice)
+        _write_alignment_duration_notice(
+            "ALIGNMENT_DURATION_NOTICE "
+            f"pipeline=4 uid={record.uid} source={record.metadata.language} "
+            f"last_token={last_token.word!r} last_end={last_end:.4f} "
+            f"duration={duration:.4f} delta={last_end - duration:.4f} "
+            "tail_absorption=final_window "
+            "note='last token exceeds duration and will be absorbed into the final window' "
+            f"file={output_path}"
+        )
+    return notices
+
+
+def print_alignment_duration_notice_summary(notices: list[dict[str, object]]) -> None:
+    print()
+    print("=== Pipeline 4: alignment duration reminders (absorbed into final window) ===")
+    print("count:", len(notices))
+    if not notices:
+        return
+    for notice in notices:
+        print(
+            f"uid={notice['uid']} "
+            f"source={notice['source_language']} "
+            f"last_token={notice['last_token']!r} "
+            f"last_end={float(notice['last_end']):.4f} "
+            f"duration={float(notice['duration']):.4f} "
+            f"delta={float(notice['delta']):.4f} "
+            "note='will be absorbed into the final window' "
+            f"file={notice['file']}"
+        )
 
 QWEN3_ALIGN_MODELS = {
     lang_code: Qwen3ForcedAlignment(model, device_map="cpu", attn_implementation=None, max_inference_batch_size=BATCH_SIZE)
@@ -47,7 +119,10 @@ WHISPERX_ALIGN_MODELS = {
 
 async def main() -> None:
     prerequisite_cache_parts = load_pipeline_records_by_part_latest(INPUT_CACHE_BASE)
-    runner = ForcedAlignmentRunner(concurrency=DEFAULT_CONCURRENCY)
+    runner = ForcedAlignmentRunner(
+        concurrency=DEFAULT_CONCURRENCY,
+        repair_raw_token_timing_overlap=REPAIR_RAW_TOKEN_TIMING_OVERLAP,
+    )
     total_records = sum(len(records) for _, records in prerequisite_cache_parts)
     existing_finished = 0
     for input_cache_path, prerequisite_records in prerequisite_cache_parts:
@@ -77,12 +152,14 @@ async def main() -> None:
     print("output_dir_name:", OUTPUT_BASE.name)
     print("max_current_tasks:", MAX_CURRENT_TASKS)
     print("enable_visualization:", ENABLE_VISUALIZATION)
+    print("repair_raw_token_timing_overlap:", REPAIR_RAW_TOKEN_TIMING_OVERLAP)
     print()
 
     if ALIGN_PROVIDER not in {"qwen3", "whisperx"}:
         raise ValueError(f"Unsupported ALIGN_PROVIDER: {ALIGN_PROVIDER}")
 
     loaded_models: dict[str, Qwen3ForcedAlignment | WhisperXForcedAlignment] = {}
+    alignment_duration_notices: list[dict[str, object]] = []
     try:
         for input_cache_path, prerequisite_records in prerequisite_cache_parts:
             if not prerequisite_records:
@@ -101,6 +178,7 @@ async def main() -> None:
                 if record.uid not in existing_output_by_uid
                 or runner.record_status(existing_output_by_uid[record.uid]) != "finished"
             ]
+            current_task_uids = {record.uid for record in pending_records}
 
             if not pending_records:
                 continue
@@ -134,10 +212,17 @@ async def main() -> None:
                     max_current_tasks=MAX_CURRENT_TASKS,
                     enable_visualization=ENABLE_VISUALIZATION,
                 )
+            alignment_duration_notices.extend(
+                collect_alignment_duration_notices(
+                    output_path=output_path,
+                    current_task_uids=current_task_uids,
+                )
+            )
     finally:
         for model in loaded_models.values():
             model.unload()
         runner.close_progress()
+    print_alignment_duration_notice_summary(alignment_duration_notices)
 
 
 if __name__ == "__main__":

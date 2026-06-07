@@ -66,6 +66,22 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 4. target-centric source mapping
 5. final dataset collection/export
 
+### Timing drift and alignment word grouping
+
+Forced-alignment models can produce slightly drifted timestamps near the end of an utterance. As a result, the last few aligned tokens may have end times that exceed the real audio duration.
+
+MakeSense treats this as expected tail drift rather than a fatal alignment problem. The streaming release windows are still defined by the real audio duration and the configured window size. When tail tokens drift past the real duration, downstream stages absorb those tail tokens into the final release window instead of creating an extra window or rejecting the whole record for that reason.
+
+This tail-drift allowance does not remove the causal timing check inside forced-alignment output. Adjacent raw alignment tokens should remain monotonic: the previous token's end time should not be later than the next token's start time. By default, MakeSense rejects a record when this adjacent-token order is violated. Pipeline 4 also exposes an optional, default-off repair switch for small boundary drift: when enabled, a recoverable overlap where `next.start < prev.end < next.end` is repaired by setting `next.start = prev.end`. A touching zero-duration next token such as `prev.end == next.start == next.end` is accepted. If an overlap would make the next token zero-length or negative after repair (`prev.end >= next.end` while `prev.end > next.start`), the forced-alignment result is rejected as a validation failure for that record, while processing can continue for other records.
+
+During training-data construction, if the audio duration is shorter than `window_count × window_size`, the audio input is padded to the corresponding window length. This keeps the conversation turns, release windows, and audio chunks aligned while preserving the real-duration-based window boundary semantics.
+
+Pipeline 4 stores the forced aligner's timed tokens in `alignment.tokens`. It also stores `alignment.words`, which are tokenizer-produced groups that merge those timed tokens into words. Later stages, including Pipeline 8 `source_token_ids`, refer to these words, not directly to the raw timed token positions.
+
+This grouping is needed because Qwen3-ForcedAligner can produce tokens that are finer than the words used later. For Chinese and Korean, Qwen3-ForcedAligner handles text at a very fine, effectively character-level timed-token granularity, so the tokenizer groups characters or other fine tokens into Chinese words or Korean whitespace/eojeol words. Japanese is the special case: Qwen3-ForcedAligner uses the `nagisa` tokenizer for Japanese timed tokens, while MakeSense may use a different project tokenizer when building `alignment.words`, so Japanese words may also be formed by merging timed tokens across tokenizer-boundary differences.
+
+MakeSense intentionally uses a conservative timing strategy for these groups. Streaming simultaneous translation depends on strict time causality, so the pipeline does not split one timed token and invent sub-token timestamps. Instead, when several timed tokens are grouped into one word, the word uses the first token's start time and the last token's end time. This avoids artificial time boundaries that could break causal streaming behavior.
+
 ## Usage: run the full dataset pipeline
 
 The active workflow is driven by the stage scripts in `examples/`. Each stage reads the previous stage cache, writes a new stage cache, and can be resumed from existing JSONL cache state.
