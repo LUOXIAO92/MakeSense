@@ -94,6 +94,7 @@ class LoraTrainConfig:
     continue_plan: ContinuePlan | None = None
     model_name: str = ""
     seed: int = 4021
+    cuda_empty_cache_steps: int | None = None
 
 
 def _set_seed(seed: int) -> None:
@@ -102,6 +103,33 @@ def _set_seed(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+
+class CudaEmptyCacheCallback:
+    """Opt-in allocator-cache release at optimizer-step boundaries."""
+
+    def __init__(self, *, cuda_empty_cache_steps: int | None) -> None:
+        if cuda_empty_cache_steps is not None and int(cuda_empty_cache_steps) <= 0:
+            raise ValueError("cuda_empty_cache_steps must be positive when provided")
+        self.cuda_empty_cache_steps = None if cuda_empty_cache_steps is None else int(cuda_empty_cache_steps)
+
+    def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001, D401
+        if self.cuda_empty_cache_steps is None:
+            return control
+        step = int(getattr(state, "global_step", 0) or 0)
+        if step > 0 and step % self.cuda_empty_cache_steps == 0 and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return control
+
+
+def _maybe_cuda_empty_cache_callback(cuda_empty_cache_steps: int | None):
+    if cuda_empty_cache_steps is None:
+        return None
+    from transformers import TrainerCallback
+
+    class _CudaEmptyCacheTrainerCallback(CudaEmptyCacheCallback, TrainerCallback):
+        pass
+
+    return _CudaEmptyCacheTrainerCallback(cuda_empty_cache_steps=cuda_empty_cache_steps)
 
 def _examples_to_rows(
     examples: list[TrainingExample],
@@ -164,15 +192,32 @@ def load_audio_waveform(audio_path: str | Path, *, target_sampling_rate: int) ->
     return waveform.to(dtype=torch.float32)
 
 
-def split_audio_into_chunks(waveform: torch.Tensor, *, sampling_rate: int, chunk_seconds: float) -> list[torch.Tensor]:
-    """Split audio into fixed-size causal chunks and zero-pad the final chunk."""
+def split_audio_into_chunks(
+    waveform: torch.Tensor,
+    *,
+    sampling_rate: int,
+    chunk_seconds: float,
+    expected_chunk_count: int | None = None,
+) -> list[torch.Tensor]:
+    """Split audio into fixed-size causal chunks and zero-pad the final chunk.
+
+    When ``expected_chunk_count`` is provided, it is the authoritative
+    metadata-derived window count. This keeps training audio turns aligned with
+    final-dataset ASR/translation output windows even if the physical audio file
+    contains a tiny encoder/container tail beyond ``metadata.duration``.
+    """
 
     if waveform.ndim != 1:
         raise ValueError(f"Expected mono waveform shape [samples], got {tuple(waveform.shape)}")
     chunk_size = int(round(float(sampling_rate) * chunk_seconds))
     if chunk_size <= 0:
         raise ValueError(f"Invalid audio chunk size from sampling_rate={sampling_rate}, chunk_seconds={chunk_seconds}")
-    chunk_count = max(1, math.ceil(int(waveform.numel()) / chunk_size))
+    if expected_chunk_count is None:
+        chunk_count = max(1, math.ceil(int(waveform.numel()) / chunk_size))
+    else:
+        chunk_count = int(expected_chunk_count)
+        if chunk_count <= 0:
+            raise ValueError(f"expected_chunk_count must be positive: {expected_chunk_count}")
     chunks: list[torch.Tensor] = []
     for index in range(chunk_count):
         start = index * chunk_size
@@ -272,6 +317,7 @@ class MakeSenseAudioCollator:
             waveform,
             sampling_rate=self.audio_sampling_rate,
             chunk_seconds=self.audio_chunk_seconds,
+            expected_chunk_count=len(example.src_outputs),
         )
         _validate_example_chunk_counts(example, audio_chunks)
         return audio_chunks
@@ -305,7 +351,8 @@ class MakeSenseAudioCollator:
                     f"Example {example.uid} audio slot/chunk mismatch: "
                     f"audio_slots={audio_slot_count}, audio_chunks={len(audio_chunks)}"
                 )
-            rendered_texts.append(_render_chat(self.processor, messages))
+            rendered = _render_chat(self.processor, messages)
+            rendered_texts.append(rendered)
             flat_audio_chunks.extend(audio_chunks)
 
         batch = self._call_processor(rendered_texts, flat_audio_chunks)
@@ -364,6 +411,7 @@ def _format_startup_metadata(
         f"  - CHECKPOINT_PATH: {checkpoint_path}",
         f"  - RESOLVED_CHECKPOINT_PATH: {resolved_checkpoint}",
         f"  - SAVE_PROCESSOR: {str(train_config.save_processor).lower()}",
+        f"  - CUDA_EMPTY_CACHE_STEPS: {train_config.cuda_empty_cache_steps}",
         "",
         "Dataset",
         f"  - TRAIN_EXAMPLES: {train_examples}",
@@ -564,6 +612,9 @@ def train_lora(
             enable_progress=True,
         )
     ]
+    cuda_empty_cache_callback = _maybe_cuda_empty_cache_callback(train_config.cuda_empty_cache_steps)
+    if cuda_empty_cache_callback is not None:
+        callbacks.append(cuda_empty_cache_callback)
     trainer = Trainer(
         model=model,
         args=args,

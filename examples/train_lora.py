@@ -15,25 +15,27 @@ warnings.filterwarnings(
 from pathlib import Path
 
 import torch
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForMultimodalLM, AutoProcessor, BitsAndBytesConfig
 
-from train import LoraTrainConfig, TrainingDataConfig, train_lora
+from train import LoraTrainConfig, TrainingDataConfig, prepare_multimodal_model_for_kbit_lora_training, train_lora
 from train.continue_utils import prepare_lora_model_for_continue, resolve_continue_plan
 
 
 
 
 # --- Dataset controls ---
-DATASET_ROOT = Path("dataset_test")
+import os
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+# DATASET_ROOT = Path("dataset_test")
 TOTAL_SAMPLES: int | None = None
 SEED = 4021
 
 # Dataset sampling group: repeat the source record pool, then shuffle and assign
 # task labels. `TASK_RATIO` is (translation, asr), and `SPLIT_RATIO` is (train, validate, test).
-DATASET_REPEAT = 3
+DATASET_REPEAT = 1
 TASK_RATIO: tuple[float, float] = (9, 1)
-SPLIT_RATIO: tuple[float, float, float] = (0.75, 0.15, 0.1)
+SPLIT_RATIO: tuple[float, float, float] = (0.8, 0.1, 0.1)
 
 # Translation-subtask sampling group: used only after a sample is assigned to the
 # translation task. The three ratio values are normalized together. For
@@ -47,7 +49,7 @@ TRANSLATION_TASK_CONFIG = {
 
 
 # --- Output / checkpoint controls ---
-OUTPUT_DIR = Path("outputs") / "makesense_lora2"
+OUTPUT_DIR = Path("outputs") / "makesense_lora"
 CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
@@ -55,7 +57,7 @@ SAVE_PROCESSOR = False
 
 # --- Model / LoRA controls ---
 MODEL_NAME = "google/gemma-4-E2B-it"
-MAX_SEQ_LENGTH = 32000
+MAX_SEQ_LENGTH = 16000
 LOAD_IN_4BIT = True
 AUDIO_SAMPLING_RATE = 16000
 AUDIO_CHUNK_SECONDS = 1.0
@@ -79,20 +81,21 @@ WEIGHT_DECAY = 0.0
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
 MAX_GRAD_NORM = 1.0
-NUM_TRAIN_EPOCHS = 20
+NUM_TRAIN_EPOCHS = 5
 MAX_STEPS = -1
 PER_DEVICE_TRAIN_BATCH_SIZE = 1
 PER_DEVICE_EVAL_BATCH_SIZE = 1
-GRADIENT_ACCUMULATION_STEPS = 8
-WARMUP_STEPS = int(0.01 * 120 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
+GRADIENT_ACCUMULATION_STEPS = 16
+WARMUP_STEPS = int(0.01 * 24000 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
 LOGGING_STEPS = 1
-EVAL_STEPS = 50
 EVAL_ACCUMULATION_STEPS = 1
-SAVE_STEPS = 50
-TEST_STEPS = 50
+EVAL_STEPS = 300
+SAVE_STEPS = 300
+TEST_STEPS = 300
 TEST_MAX_NEW_TOKENS = 512
 TEST_RECORD_COUNT = -1
 TEST_OUTPUT_MARKDOWN = True
+CUDA_EMPTY_CACHE_STEPS: int | None = 1
 
 
 def load_processor():
@@ -117,17 +120,13 @@ def load_base_model():
         )
     base_model = AutoModelForMultimodalLM.from_pretrained(
         MODEL_NAME,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         quantization_config=quantization_config,
         trust_remote_code=True,
     )
     if LOAD_IN_4BIT:
-        base_model = prepare_model_for_kbit_training(
-            base_model,
-            use_gradient_checkpointing=True,
-            gradient_checkpointing_kwargs={"use_reentrant": False},
-        )
+        base_model = prepare_multimodal_model_for_kbit_lora_training(base_model)
     return base_model
 
 
@@ -184,6 +183,7 @@ def main() -> None:
         test_max_new_tokens=TEST_MAX_NEW_TOKENS,
         test_record_count=TEST_RECORD_COUNT,
         test_output_markdown=TEST_OUTPUT_MARKDOWN,
+        cuda_empty_cache_steps=CUDA_EMPTY_CACHE_STEPS,
         assistant_header=ASSISTANT_HEADER,
         assistant_end=ASSISTANT_END,
         generation_stop=GENERATION_STOP,
