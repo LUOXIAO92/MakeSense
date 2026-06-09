@@ -310,6 +310,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         test_steps: int,
         test_max_new_tokens: int,
         test_record_count: int,
+        test_batch_size: int = 1,
         test_output_markdown: bool = False,
         test_outputs_dir_name: str = "test_outputs",
         generation_stop: str,
@@ -323,6 +324,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         self.test_output_markdown = bool(test_output_markdown)
         self.test_metadata = dict(test_metadata or {})
         self.test_steps = test_steps
+        self._last_test_step: int | None = None
         self.logging_dir = Path(logging_dir)
         self.latest_metrics: dict[str, Any] = {}
         self.tensorboard_writer = ProjectTensorBoardWriter(
@@ -336,6 +338,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
             collator=collator,
             test_max_new_tokens=test_max_new_tokens,
             test_record_count=test_record_count,
+            test_batch_size=test_batch_size,
             generation_stop=generation_stop,
             enable_thinking=False,
         )
@@ -357,6 +360,10 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         **kwargs: Any,
     ) -> None:
         self._update_progress(state)
+        step = int(state.global_step)
+        if self._should_defer_step_test_to_evaluate(args=args, step=step):
+            return
+        self._maybe_run_periodic_test(state=state, kwargs=kwargs)
 
     def on_log(
         self,
@@ -380,6 +387,25 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         )
         self._update_progress(state)
 
+    def on_evaluate(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        metrics: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if metrics:
+            self.latest_metrics.update(
+                {
+                    key: value
+                    for key, value in metrics.items()
+                    if key in {"loss", "eval_loss", "grad_norm", "learning_rate", "epoch"}
+                }
+            )
+        self._update_progress(state)
+        self._maybe_run_periodic_test(state=state, kwargs=kwargs)
+
     def on_save(
         self,
         args: TrainingArguments,
@@ -387,11 +413,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs: Any,
     ) -> None:
-        step = int(state.global_step)
-        if not self._should_test(step):
-            return
-        model = kwargs["model"]
-        self._run_and_persist_test(model=model, step=step, metrics=dict(self.latest_metrics))
+        return None
 
     def on_train_end(
         self,
@@ -422,6 +444,27 @@ class MakeSenseMonitoringCallback(TrainerCallback):
             and step % self.test_steps == 0
             and self.tester.has_rows()
         )
+
+    def _should_defer_step_test_to_evaluate(self, *, args: TrainingArguments, step: int) -> bool:
+        if not self._should_test(step):
+            return False
+        eval_steps = getattr(args, "eval_steps", None)
+        if not eval_steps:
+            return False
+        eval_strategy = getattr(args, "eval_strategy", getattr(args, "evaluation_strategy", None))
+        if eval_strategy is None or str(eval_strategy).lower().endswith("no"):
+            return False
+        return step % int(eval_steps) == 0
+
+    def _maybe_run_periodic_test(self, *, state: TrainerState, kwargs: dict[str, Any]) -> dict[str, Any] | None:
+        step = int(state.global_step)
+        if not self._should_test(step):
+            return None
+        if self._last_test_step == step:
+            return None
+        model = kwargs["model"]
+        self._last_test_step = step
+        return self._run_and_persist_test(model=model, step=step, metrics=dict(self.latest_metrics))
 
     def _write_test_metrics(self, summary: dict[str, Any]) -> None:
         payload = _load_test_metrics_history(self.test_metrics_json_path)

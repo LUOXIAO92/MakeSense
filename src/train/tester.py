@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,7 +23,7 @@ def render_chat(
         messages,
         tokenize=False,
         add_generation_prompt=add_generation_prompt,
-        enable_thinking=False,
+        enable_thinking=enable_thinking,
     )
     return str(rendered)
 
@@ -74,23 +75,46 @@ def _pop_training_only_processor_keys(batch: dict[str, Any]) -> dict[str, Any]:
     return batch
 
 
-def _past_key_values_from_output(output: Any) -> Any:
-    past_key_values = getattr(output, "past_key_values", None)
-    if past_key_values is None and isinstance(output, dict):
-        past_key_values = output.get("past_key_values")
-    if past_key_values is None:
-        raise ValueError("Model output does not contain past_key_values for prefill-cache reuse")
-    return past_key_values
+_MISSING = object()
 
 
-@dataclass(frozen=True)
-class PromptPrefillCacheState:
-    """KV cache plus exact rendered/token/audio prefix represented by it."""
+@contextmanager
+def temporarily_enable_generation_cache(model: Any):
+    """Temporarily set model generation cache flags and restore them afterward."""
 
-    rendered_text: str
-    input_ids: torch.Tensor
-    audio_slots: int
-    past_key_values: Any
+    touched: list[tuple[Any, str, Any]] = []
+    for owner in (getattr(model, "config", None), getattr(model, "generation_config", None)):
+        if owner is not None and hasattr(owner, "use_cache"):
+            touched.append((owner, "use_cache", getattr(owner, "use_cache", _MISSING)))
+            setattr(owner, "use_cache", True)
+    try:
+        yield
+    finally:
+        for owner, name, old_value in reversed(touched):
+            if old_value is _MISSING:
+                try:
+                    delattr(owner, name)
+                except AttributeError:
+                    pass
+            else:
+                setattr(owner, name, old_value)
+
+
+@dataclass
+class _RolloutRecordState:
+    example: Any
+    messages: list[ChatMessage]
+    system_prompt: str
+    assistant_indices: list[int]
+    audio_chunks: list[torch.Tensor]
+    outputs: list[dict[str, str]]
+    rollout_messages: list[ChatMessage]
+    record_index: int
+    record_count: int
+    next_turn_offset: int = 0
+
+    def done(self) -> bool:
+        return self.next_turn_offset >= len(self.assistant_indices)
 
 
 class StreamingSampleTester:
@@ -106,9 +130,12 @@ class StreamingSampleTester:
         test_record_count: int,
         generation_stop: str,
         enable_thinking: bool = False,
+        test_batch_size: int = 1,
     ) -> None:
         if not generation_stop:
             raise ValueError("StreamingSampleTester requires generation_stop")
+        if int(test_batch_size) <= 0:
+            raise ValueError("test_batch_size must be positive")
         self.processor = processor
         self.test_rows = test_rows or []
         self.collator = collator
@@ -116,6 +143,7 @@ class StreamingSampleTester:
         self.test_record_count = int(test_record_count)
         self.generation_stop = generation_stop
         self.enable_thinking = enable_thinking
+        self.test_batch_size = int(test_batch_size)
 
     def has_rows(self) -> bool:
         return bool(self.selected_count() > 0)
@@ -138,61 +166,110 @@ class StreamingSampleTester:
 
     @torch.no_grad()
     def generate_records(self, *, model: Any, step: int, metrics: dict[str, Any]) -> list[dict[str, Any]]:
-        """Generate selected records without prompt-prefill reuse.
+        """Generate selected records via batched full prompt recomputation.
 
-        This method is kept as a backup/debug baseline only. Normal training
-        monitoring uses ``generate_records_with_prefill_cache(...)`` directly;
-        switch to this method in code only when debugging the prefill path.
+        Batching is only across records at their current rollout frontier.  Turns
+        inside one record remain sequential because each later prompt depends on
+        the previous model-generated assistant output.
         """
 
-        records: list[dict[str, Any]] = []
+        selected_rows = self.selected_rows()
+        progress = self._make_test_progress_bar(step=step, rows=selected_rows)
         was_training = bool(model.training)
         model.eval()
         try:
-            for row in self.selected_rows():
-                records.append(self._generate_record_for_row(model=model, row=row, step=step, metrics=metrics))
+            states = [
+                self._make_rollout_state(row=row, record_index=index, record_count=len(selected_rows))
+                for index, row in enumerate(selected_rows, start=1)
+            ]
+            with temporarily_enable_generation_cache(model):
+                while True:
+                    active_states = [state for state in states if not state.done()]
+                    if not active_states:
+                        break
+                    for start in range(0, len(active_states), self.test_batch_size):
+                        self._generate_next_turn_batch(
+                            model=model,
+                            states=active_states[start:start + self.test_batch_size],
+                            step=step,
+                            progress=progress,
+                        )
+            records = [self._record_from_state(state, step=step, metrics=metrics) for state in states]
         finally:
+            self._close_test_progress_bar(progress)
             if was_training:
                 model.train()
         return records
 
-    def _generate_record_for_row(
+    def _make_rollout_state(
+        self,
+        *,
+        row: dict[str, Any],
+        record_index: int,
+        record_count: int,
+    ) -> _RolloutRecordState:
+        example = row["example"]
+        messages: list[ChatMessage] = row["messages"]
+        return _RolloutRecordState(
+            example=example,
+            messages=messages,
+            system_prompt=str(messages[0]["content"]),
+            assistant_indices=assistant_turn_indices(messages),
+            audio_chunks=self.collator._audio_chunks_for_example(example),
+            outputs=[],
+            rollout_messages=[messages[0]],
+            record_index=record_index,
+            record_count=record_count,
+        )
+
+    def _generate_next_turn_batch(
         self,
         *,
         model: Any,
-        row: dict[str, Any],
+        states: list[_RolloutRecordState],
         step: int,
-        metrics: dict[str, Any],
-    ) -> dict[str, Any]:
-        example = row["example"]
-        messages: list[ChatMessage] = row["messages"]
-        system_prompt = str(messages[0]["content"])
-        assistant_indices = assistant_turn_indices(messages)
-        audio_chunks = self.collator._audio_chunks_for_example(example)
-        outputs: list[dict[str, str]] = []
-        rollout_messages: list[ChatMessage] = [messages[0]]
+        progress: Any | None,
+    ) -> None:
+        rendered_texts: list[str] = []
+        flat_audio_chunks: list[torch.Tensor] = []
+        ground_truths: list[str] = []
 
-        for turn_number, assistant_index in enumerate(assistant_indices, start=1):
+        for state in states:
+            turn_number = state.next_turn_offset + 1
+            assistant_index = state.assistant_indices[state.next_turn_offset]
             user_index = assistant_index - 1
-            if user_index <= 0 or messages[user_index]["role"] != "user":
+            if user_index <= 0 or state.messages[user_index]["role"] != "user":
                 raise ValueError(
-                    f"Expected user message before assistant turn {turn_number} for {example.uid}"
+                    f"Expected user message before assistant turn {turn_number} for {state.example.uid}"
                 )
-            rollout_messages.append(messages[user_index])
-            ground_truth = str(messages[assistant_index]["content"])
-            raw_output, postprocessed_output = self.generate_turn_text(
-                model=model,
-                prefix_messages=rollout_messages,
-                audio_chunks=audio_chunks,
+            state.rollout_messages.append(state.messages[user_index])
+            ground_truths.append(str(state.messages[assistant_index]["content"]))
+            slot_count = audio_slot_count(state.rollout_messages)
+            rendered_texts.append(
+                render_chat(
+                    self.processor,
+                    state.rollout_messages,
+                    add_generation_prompt=True,
+                    enable_thinking=self.enable_thinking,
+                )
             )
-            rollout_messages.append(
-                {
-                    "role": "assistant",
-                    "content": postprocessed_output,
-                }
+            flat_audio_chunks.extend(state.audio_chunks[:slot_count])
+
+        output_ids_batch = self._generate_output_ids_batch(
+            model=model,
+            rendered_texts=rendered_texts,
+            flat_audio_chunks=flat_audio_chunks,
+        )
+        for state, output_ids, ground_truth in zip(states, output_ids_batch, ground_truths, strict=True):
+            raw_output = decode_raw_generated_text(self.processor, output_ids)
+            postprocessed_output = decode_generated_text(
+                self.processor,
+                output_ids,
+                generation_stop=self.generation_stop,
             )
+            state.rollout_messages.append({"role": "assistant", "content": postprocessed_output})
             protocol = parse_protocol_output(postprocessed_output)
-            outputs.append(
+            state.outputs.append(
                 {
                     "ground_truth": ground_truth,
                     "raw_output": raw_output,
@@ -203,14 +280,54 @@ class StreamingSampleTester:
                     "postprocessed_turn_stopped": postprocessed_turn_stopped(postprocessed_output, protocol),
                 }
             )
+            state.next_turn_offset += 1
+            self._update_test_progress_description(
+                progress,
+                step=step,
+                uid=str(state.example.uid),
+                record_index=state.record_index,
+                record_count=state.record_count,
+                turn_number=state.next_turn_offset,
+                turn_count=len(state.assistant_indices),
+            )
+            self._advance_test_progress(progress)
 
-        return {
-            "step": step,
-            "metrics": metrics,
-            "uid": str(example.uid),
-            "system_prompt": system_prompt,
-            "outputs": outputs,
-        }
+    def _generate_output_ids_batch(
+        self,
+        *,
+        model: Any,
+        rendered_texts: list[str],
+        flat_audio_chunks: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        if not rendered_texts:
+            return []
+        batch = self.collator._call_processor(rendered_texts=rendered_texts, flat_audio_chunks=flat_audio_chunks)
+        batch = _pop_training_only_processor_keys(batch)
+        input_ids = batch.get("input_ids")
+        if not isinstance(input_ids, torch.Tensor):
+            raise ValueError("Processor output does not contain tensor input_ids for sample generation")
+        attention_mask = batch.get("attention_mask")
+        if isinstance(attention_mask, torch.Tensor):
+            prompt_lengths = [int(length) for length in attention_mask.sum(dim=1).detach().cpu().tolist()]
+        else:
+            prompt_lengths = [int(input_ids.shape[1])] * int(input_ids.shape[0])
+        batch = move_tensor_batch_to_device(batch, model_device(model))
+        generated = model.generate(
+            **batch,
+            max_new_tokens=self.test_max_new_tokens,
+            use_cache=True,
+        )
+        if not isinstance(generated, torch.Tensor):
+            sequences = getattr(generated, "sequences", None)
+            if not isinstance(sequences, torch.Tensor):
+                raise ValueError("model.generate did not return tensor sequences")
+            generated = sequences
+        padded_prompt_length = int(input_ids.shape[1])
+        output_ids: list[torch.Tensor] = []
+        for row_index, prompt_length in enumerate(prompt_lengths):
+            start = padded_prompt_length if int(generated.shape[1]) >= padded_prompt_length else prompt_length
+            output_ids.append(generated[row_index:row_index + 1, start:].detach().cpu())
+        return output_ids
 
     def generate_turn_text(
         self,
@@ -226,21 +343,12 @@ class StreamingSampleTester:
             add_generation_prompt=True,
             enable_thinking=self.enable_thinking,
         )
-        batch = self.collator._call_processor(rendered_texts=[rendered], flat_audio_chunks=audio_chunks[:slot_count])
-        batch.pop("labels", None)
-        batch.pop("assistant_masks", None)
-        batch.pop("completion_mask", None)
-        batch.pop("assistant_tokens_mask", None)
-        input_ids = batch.get("input_ids")
-        if not isinstance(input_ids, torch.Tensor):
-            raise ValueError("Processor output does not contain tensor input_ids for sample generation")
-        prompt_length = int(input_ids.shape[1])
-        batch = move_tensor_batch_to_device(batch, model_device(model))
-        generated = model.generate(
-            **batch,
-            max_new_tokens=self.test_max_new_tokens,
-        )
-        output_ids = generated[:, prompt_length:]
+        with temporarily_enable_generation_cache(model):
+            output_ids = self._generate_output_ids_batch(
+                model=model,
+                rendered_texts=[rendered],
+                flat_audio_chunks=audio_chunks[:slot_count],
+            )[0]
         raw_output = decode_raw_generated_text(self.processor, output_ids)
         postprocessed_output = decode_generated_text(
             self.processor,
@@ -249,358 +357,20 @@ class StreamingSampleTester:
         )
         return raw_output, postprocessed_output
 
-    @torch.no_grad()
-    def generate_records_with_prefill_cache(
-        self,
+    @staticmethod
+    def _record_from_state(
+        state: _RolloutRecordState,
         *,
-        model: Any,
-        step: int,
-        metrics: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        """Generate selected records with experimental cross-turn prompt prefill reuse.
-
-        This is the normal training-monitoring path. ``generate_records`` is
-        retained only as a backup/debug baseline. The method keeps the same
-        real-rollout semantics: generated assistant text is appended to the
-        conversation before exposing the next audio turn.
-        """
-
-        records: list[dict[str, Any]] = []
-        was_training = bool(model.training)
-        model.eval()
-        try:
-            for row in self.selected_rows():
-                records.append(
-                    self._generate_record_for_row_with_prefill_cache(
-                        model=model,
-                        row=row,
-                        step=step,
-                        metrics=metrics,
-                    )
-                )
-        finally:
-            if was_training:
-                model.train()
-        return records
-
-    def _generate_record_for_row_with_prefill_cache(
-        self,
-        *,
-        model: Any,
-        row: dict[str, Any],
         step: int,
         metrics: dict[str, Any],
     ) -> dict[str, Any]:
-        """Generate one record with real rollout and reusable prompt KV cache."""
-
-        example = row["example"]
-        messages: list[ChatMessage] = row["messages"]
-        system_prompt = str(messages[0]["content"])
-        assistant_indices = assistant_turn_indices(messages)
-        audio_chunks = self.collator._audio_chunks_for_example(example)
-        outputs: list[dict[str, str]] = []
-        rollout_messages: list[ChatMessage] = [messages[0]]
-        cache_state: PromptPrefillCacheState | None = None
-
-        for turn_number, assistant_index in enumerate(assistant_indices, start=1):
-            user_index = assistant_index - 1
-            if user_index <= 0 or messages[user_index]["role"] != "user":
-                raise ValueError(
-                    f"Expected user message before assistant turn {turn_number} for {example.uid}"
-                )
-            rollout_messages.append(messages[user_index])
-            ground_truth = str(messages[assistant_index]["content"])
-            raw_output, postprocessed_output = self.generate_turn_text_with_prefill_cache(
-                model=model,
-                prefix_messages=rollout_messages,
-                audio_chunks=audio_chunks,
-                cache_state=cache_state,
-            )
-            rollout_messages.append(
-                {
-                    "role": "assistant",
-                    "content": postprocessed_output,
-                }
-            )
-            cache_state = self.prefill_prompt_cache_for_messages(
-                model=model,
-                messages=rollout_messages,
-                audio_chunks=audio_chunks,
-                add_generation_prompt=False,
-                cache_state=cache_state,
-            )
-            protocol = parse_protocol_output(postprocessed_output)
-            outputs.append(
-                {
-                    "ground_truth": ground_truth,
-                    "raw_output": raw_output,
-                    "postprocessed_output": postprocessed_output,
-                    "extracted_protocol_output": protocol["normalized_output"],
-                    "protocol_valid": protocol["valid"],
-                    "raw_turn_stopped": raw_turn_stopped(raw_output, postprocessed_output, self.generation_stop),
-                    "postprocessed_turn_stopped": postprocessed_turn_stopped(postprocessed_output, protocol),
-                }
-            )
-
         return {
             "step": step,
             "metrics": metrics,
-            "uid": str(example.uid),
-            "system_prompt": system_prompt,
-            "outputs": outputs,
+            "uid": str(state.example.uid),
+            "system_prompt": state.system_prompt,
+            "outputs": state.outputs,
         }
-
-    def generate_turn_text_with_prefill_cache(
-        self,
-        *,
-        model: Any,
-        prefix_messages: list[ChatMessage],
-        audio_chunks: list[torch.Tensor],
-        cache_state: PromptPrefillCacheState | None,
-    ) -> tuple[str, str]:
-        """Generate one turn by reusing cached prompt prefill when possible.
-
-        ``cache_state`` must describe the exact text/token/audio prefix
-        represented by its ``past_key_values``. The method validates both the
-        rendered-string prefix and token prefix, then processor-encodes only the
-        newly appended rendered suffix with only newly exposed audio chunks. A
-        mismatch is treated as an error rather than silently falling back,
-        because silent fallback would make benchmark timing ambiguous.
-        """
-
-        full_batch, full_input_ids, slot_count, full_rendered = self._processor_batch_for_messages(
-            messages=prefix_messages,
-            audio_chunks=audio_chunks,
-            add_generation_prompt=True,
-        )
-        suffix_batch, suffix_input_ids, prefix_length = self._suffix_batch_for_cache_state(
-            full_batch=full_batch,
-            full_input_ids=full_input_ids,
-            full_rendered=full_rendered,
-            full_audio_slots=slot_count,
-            all_audio_chunks=audio_chunks,
-            cache_state=cache_state,
-        )
-        if int(suffix_input_ids.shape[1]) <= 0:
-            raise ValueError("Prefill-cache generation requires a non-empty prompt suffix")
-        suffix_batch = move_tensor_batch_to_device(suffix_batch, model_device(model))
-        if cache_state is not None:
-            suffix_batch["past_key_values"] = cache_state.past_key_values
-        generated = model.generate(
-            **suffix_batch,
-            max_new_tokens=self.test_max_new_tokens,
-            use_cache=True,
-            return_dict_in_generate=True,
-            output_scores=False,
-        )
-        sequences = getattr(generated, "sequences", generated)
-        if not isinstance(sequences, torch.Tensor):
-            raise ValueError("model.generate did not return tensor sequences for prefill-cache generation")
-        output_ids = self._extract_generated_suffix_output_ids(
-            sequences=sequences,
-            full_input_ids=full_input_ids.to(sequences.device),
-            suffix_input_ids=suffix_input_ids.to(sequences.device),
-        )
-        raw_output = decode_raw_generated_text(self.processor, output_ids)
-        postprocessed_output = decode_generated_text(
-            self.processor,
-            output_ids,
-            generation_stop=self.generation_stop,
-        )
-        return raw_output, postprocessed_output
-
-    def prefill_prompt_cache_for_messages(
-        self,
-        *,
-        model: Any,
-        messages: list[ChatMessage],
-        audio_chunks: list[torch.Tensor],
-        add_generation_prompt: bool,
-        cache_state: PromptPrefillCacheState | None,
-    ) -> PromptPrefillCacheState:
-        """Return KV cache for the canonical rendered prompt for ``messages``."""
-
-        full_batch, full_input_ids, slot_count, full_rendered = self._processor_batch_for_messages(
-            messages=messages,
-            audio_chunks=audio_chunks,
-            add_generation_prompt=add_generation_prompt,
-        )
-        suffix_batch, suffix_input_ids, prefix_length = self._suffix_batch_for_cache_state(
-            full_batch=full_batch,
-            full_input_ids=full_input_ids,
-            full_rendered=full_rendered,
-            full_audio_slots=slot_count,
-            all_audio_chunks=audio_chunks,
-            cache_state=cache_state,
-        )
-        if int(suffix_input_ids.shape[1]) <= 0:
-            if cache_state is None:
-                raise ValueError("Initial prompt prefill cache update requires a non-empty prompt")
-            return cache_state
-        if prefix_length == int(full_input_ids.shape[1]) and cache_state is not None:
-            return cache_state
-        if prefix_length > 0 and cache_state is None:
-            raise ValueError("Internal error: non-zero cached prefix without cache state")
-        if prefix_length == int(full_input_ids.shape[1]):
-            raise ValueError("Prompt prefill cache update requires a non-empty suffix")
-        suffix_batch = move_tensor_batch_to_device(suffix_batch, model_device(model))
-        if cache_state is not None:
-            suffix_batch["past_key_values"] = cache_state.past_key_values
-        output = model(
-            **suffix_batch,
-            use_cache=True,
-            return_dict=True,
-        )
-        return PromptPrefillCacheState(
-            rendered_text=full_rendered,
-            input_ids=full_input_ids.detach().cpu(),
-            audio_slots=slot_count,
-            past_key_values=_past_key_values_from_output(output),
-        )
-
-    def _processor_batch_for_messages(
-        self,
-        *,
-        messages: list[ChatMessage],
-        audio_chunks: list[torch.Tensor],
-        add_generation_prompt: bool,
-    ) -> tuple[dict[str, Any], torch.Tensor, int, str]:
-        slot_count = audio_slot_count(messages)
-        rendered = render_chat(
-            self.processor,
-            messages,
-            add_generation_prompt=add_generation_prompt,
-            enable_thinking=self.enable_thinking,
-        )
-        batch = self.collator._call_processor(rendered_texts=[rendered], flat_audio_chunks=audio_chunks[:slot_count])
-        batch = _pop_training_only_processor_keys(batch)
-        input_ids = batch.get("input_ids")
-        if not isinstance(input_ids, torch.Tensor):
-            raise ValueError("Processor output does not contain tensor input_ids for prefill-cache generation")
-        if int(input_ids.shape[0]) != 1:
-            raise ValueError("Prefill-cache tester only supports one generated sample at a time")
-        return batch, input_ids.detach().cpu(), slot_count, rendered
-
-    def _processor_batch_for_rendered_suffix(
-        self,
-        *,
-        rendered_suffix: str,
-        audio_chunks: list[torch.Tensor],
-        full_attention_mask: torch.Tensor | None,
-    ) -> tuple[dict[str, Any], torch.Tensor]:
-        batch = self.collator._call_processor(rendered_texts=[rendered_suffix], flat_audio_chunks=audio_chunks)
-        batch = _pop_training_only_processor_keys(batch)
-        input_ids = batch.get("input_ids")
-        if not isinstance(input_ids, torch.Tensor):
-            raise ValueError("Processor output does not contain tensor input_ids for prefill-cache suffix")
-        if int(input_ids.shape[0]) != 1:
-            raise ValueError("Prefill-cache suffix processor only supports batch size 1")
-        if full_attention_mask is not None:
-            batch["attention_mask"] = full_attention_mask
-        return batch, input_ids.detach().cpu()
-
-    def _suffix_batch_for_cache_state(
-        self,
-        *,
-        full_batch: dict[str, Any],
-        full_input_ids: torch.Tensor,
-        full_rendered: str,
-        full_audio_slots: int,
-        all_audio_chunks: list[torch.Tensor],
-        cache_state: PromptPrefillCacheState | None,
-    ) -> tuple[dict[str, Any], torch.Tensor, int]:
-        if cache_state is None:
-            input_ids = full_batch.get("input_ids")
-            if not isinstance(input_ids, torch.Tensor):
-                raise ValueError("Processor output does not contain tensor input_ids")
-            return full_batch, input_ids.detach().cpu(), 0
-
-        prefix_length = self._validate_cached_prefix(
-            full_input_ids=full_input_ids,
-            cache_state=cache_state,
-        )
-        if full_audio_slots < cache_state.audio_slots:
-            raise ValueError(
-                f"Cached audio slots exceed current prompt audio slots: "
-                f"cached={cache_state.audio_slots}, current={full_audio_slots}"
-            )
-        if not full_rendered.startswith(cache_state.rendered_text):
-            raise ValueError("Cached rendered prompt is not a string prefix of the current rendered prompt")
-        rendered_suffix = full_rendered[len(cache_state.rendered_text):]
-        suffix_audio_chunks = all_audio_chunks[cache_state.audio_slots:full_audio_slots]
-        full_attention_mask = full_batch.get("attention_mask")
-        full_attention_mask = full_attention_mask if isinstance(full_attention_mask, torch.Tensor) else None
-        suffix_batch, suffix_input_ids = self._processor_batch_for_rendered_suffix(
-            rendered_suffix=rendered_suffix,
-            audio_chunks=suffix_audio_chunks,
-            full_attention_mask=full_attention_mask,
-        )
-        reconstructed = torch.cat([cache_state.input_ids.detach().cpu(), suffix_input_ids], dim=1)
-        if not torch.equal(reconstructed, full_input_ids.detach().cpu()):
-            raise ValueError(
-                "Rendered suffix tokenization does not reconstruct the full prompt token ids; "
-                "cannot safely reuse multimodal prefill cache"
-            )
-        return suffix_batch, suffix_input_ids, prefix_length
-
-    @staticmethod
-    def _validate_cached_prefix(
-        *,
-        full_input_ids: torch.Tensor,
-        cache_state: PromptPrefillCacheState,
-    ) -> int:
-        cached_prompt_ids = cache_state.input_ids.detach().cpu()
-        full_input_ids = full_input_ids.detach().cpu()
-        if int(cached_prompt_ids.shape[0]) != 1 or int(full_input_ids.shape[0]) != 1:
-            raise ValueError("Prefill-cache prefix validation expects batch size 1")
-        prefix_length = int(cached_prompt_ids.shape[1])
-        full_length = int(full_input_ids.shape[1])
-        if prefix_length > full_length:
-            raise ValueError(
-                f"Cached prompt is longer than full prompt: cached={prefix_length}, full={full_length}"
-            )
-        if prefix_length and not torch.equal(cached_prompt_ids[:, :prefix_length], full_input_ids[:, :prefix_length]):
-            raise ValueError(
-                "Cached prompt tokens are not an exact prefix of the freshly rendered prompt; "
-                "cannot safely reuse prefill cache"
-            )
-        return prefix_length
-
-    @staticmethod
-    def _slice_batch_for_cached_suffix(
-        *,
-        full_batch: dict[str, Any],
-        full_sequence_length: int,
-        prefix_length: int,
-    ) -> dict[str, Any]:
-        suffix_batch: dict[str, Any] = {}
-        for key, value in full_batch.items():
-            if not isinstance(value, torch.Tensor):
-                suffix_batch[key] = value
-                continue
-            if value.ndim >= 2 and int(value.shape[0]) == 1 and int(value.shape[1]) == full_sequence_length:
-                if key == "attention_mask":
-                    suffix_batch[key] = value
-                else:
-                    suffix_batch[key] = value[:, prefix_length:]
-            else:
-                suffix_batch[key] = value
-        return suffix_batch
-
-    @staticmethod
-    def _extract_generated_suffix_output_ids(
-        *,
-        sequences: torch.Tensor,
-        full_input_ids: torch.Tensor,
-        suffix_input_ids: torch.Tensor,
-    ) -> torch.Tensor:
-        suffix_length = int(suffix_input_ids.shape[1])
-        full_length = int(full_input_ids.shape[1])
-        if int(sequences.shape[1]) >= suffix_length and torch.equal(sequences[:, :suffix_length], suffix_input_ids):
-            return sequences[:, suffix_length:]
-        if int(sequences.shape[1]) >= full_length and torch.equal(sequences[:, :full_length], full_input_ids):
-            return sequences[:, full_length:]
-        raise ValueError("Generated sequence does not preserve expected prompt/suffix prefix")
 
     def evaluate(
         self,
@@ -609,17 +379,59 @@ class StreamingSampleTester:
         step: int,
         metrics: dict[str, Any],
     ) -> dict[str, Any]:
-        records = self.generate_records_with_prefill_cache(model=model, step=step, metrics=metrics)
+        records = self.generate_records(model=model, step=step, metrics=metrics)
         summary_metrics = summarize_test_records(records)
         return {
             "step": step,
             "metrics": metrics,
-            "test_use_prefill_cache": True,
+            "test_batch_size": self.test_batch_size,
             "test_metrics": summary_metrics,
             "total_available_test_rows": self.total_available_rows(),
             "selected_test_rows": self.selected_count(),
             "records": records,
         }
+
+    def _make_test_progress_bar(self, *, step: int, rows: list[dict[str, Any]]) -> Any | None:
+        total_turns = sum(len(assistant_turn_indices(row["messages"])) for row in rows)
+        if total_turns <= 0:
+            return None
+        from tqdm.auto import tqdm
+
+        return tqdm(
+            total=total_turns,
+            desc=f"strict-test step={int(step)}",
+            unit="turn",
+            dynamic_ncols=False,
+            leave=True,
+        )
+
+    @staticmethod
+    def _update_test_progress_description(
+        progress: Any | None,
+        *,
+        step: int,
+        uid: str,
+        record_index: int | None,
+        record_count: int | None,
+        turn_number: int,
+        turn_count: int,
+    ) -> None:
+        if progress is None:
+            return
+        record_text = "?/?" if record_index is None or record_count is None else f"{record_index}/{record_count}"
+        progress.set_description_str(
+            f"strict-test step={int(step)} record={record_text} turn={turn_number}/{turn_count} uid={uid}"
+        )
+
+    @staticmethod
+    def _advance_test_progress(progress: Any | None) -> None:
+        if progress is not None:
+            progress.update(1)
+
+    @staticmethod
+    def _close_test_progress_bar(progress: Any | None) -> None:
+        if progress is not None:
+            progress.close()
 
     @staticmethod
     def print_record(record: dict[str, Any]) -> None:

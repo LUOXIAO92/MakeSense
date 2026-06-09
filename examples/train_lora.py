@@ -35,7 +35,7 @@ SEED = 4021
 # task labels. `TASK_RATIO` is (translation, asr), and `SPLIT_RATIO` is (train, validate, test).
 DATASET_REPEAT = 1
 TASK_RATIO: tuple[float, float] = (9, 1)
-SPLIT_RATIO: tuple[float, float, float] = (0.8, 0.1, 0.1)
+SPLIT_RATIO: tuple[float, float, float] = (0.8975, 0.1, 0.0025)
 
 # Translation-subtask sampling group: used only after a sample is assigned to the
 # translation task. The three ratio values are normalized together. For
@@ -76,7 +76,7 @@ LORA_TARGET_MODULES = (
 
 
 # --- Trainer controls ---
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 0.0
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
@@ -84,16 +84,17 @@ MAX_GRAD_NORM = 1.0
 NUM_TRAIN_EPOCHS = 5
 MAX_STEPS = -1
 PER_DEVICE_TRAIN_BATCH_SIZE = 1
-PER_DEVICE_EVAL_BATCH_SIZE = 1
+PER_DEVICE_EVAL_BATCH_SIZE = 5
 GRADIENT_ACCUMULATION_STEPS = 16
 WARMUP_STEPS = int(0.01 * 24000 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
 LOGGING_STEPS = 1
 EVAL_ACCUMULATION_STEPS = 1
-EVAL_STEPS = 300
-SAVE_STEPS = 300
-TEST_STEPS = 300
+EVAL_STEPS = 10
+SAVE_STEPS = 100
+TEST_STEPS = 10
 TEST_MAX_NEW_TOKENS = 512
 TEST_RECORD_COUNT = -1
+TEST_BATCH_SIZE = 60
 TEST_OUTPUT_MARKDOWN = True
 CUDA_EMPTY_CACHE_STEPS: int | None = 1
 
@@ -182,6 +183,7 @@ def main() -> None:
         test_steps=TEST_STEPS,
         test_max_new_tokens=TEST_MAX_NEW_TOKENS,
         test_record_count=TEST_RECORD_COUNT,
+        test_batch_size=TEST_BATCH_SIZE,
         test_output_markdown=TEST_OUTPUT_MARKDOWN,
         cuda_empty_cache_steps=CUDA_EMPTY_CACHE_STEPS,
         assistant_header=ASSISTANT_HEADER,

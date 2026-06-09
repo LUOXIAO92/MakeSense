@@ -80,6 +80,7 @@ class LoraTrainConfig:
     test_steps: int = 0
     test_max_new_tokens: int = 256
     test_record_count: int = 1
+    test_batch_size: int = 1
     test_output_markdown: bool = False
     test_outputs_dir_name: str = "test_outputs"
     assistant_header: str = ""
@@ -446,6 +447,7 @@ def _format_startup_metadata(
             "Test",
             f"  - TEST_STEPS: {train_config.test_steps}",
             f"  - TEST_RECORD_COUNT: {train_config.test_record_count}",
+            f"  - TEST_BATCH_SIZE: {train_config.test_batch_size}",
             f"  - TEST_ROWS_SELECTED_THIS_RUN: {selected_test_rows}",
             f"  - TEST_ROW_SELECTION_TOTAL_AVAILABLE: {test_examples}",
         ]
@@ -604,6 +606,7 @@ def train_lora(
             test_steps=train_config.test_steps,
             test_max_new_tokens=train_config.test_max_new_tokens,
             test_record_count=train_config.test_record_count,
+            test_batch_size=train_config.test_batch_size,
             test_output_markdown=train_config.test_output_markdown,
             test_outputs_dir_name=train_config.test_outputs_dir_name,
             generation_stop=train_config.generation_stop,
