@@ -83,6 +83,7 @@ class LoraTrainConfig:
     test_max_new_tokens: int = 256
     test_record_count: int = 1
     test_batch_size: int = 1
+    test_cuda_empty_cache_steps: int | None = None
     test_output_markdown: bool = False
     test_outputs_dir_name: str = "test_outputs"
     assistant_header: str = ""
@@ -108,19 +109,27 @@ def _set_seed(seed: int) -> None:
 
 
 class CudaEmptyCacheCallback:
-    """Opt-in allocator-cache release at optimizer-step boundaries."""
+    """Opt-in allocator-cache release after optimizer steps and eval loops."""
 
     def __init__(self, *, cuda_empty_cache_steps: int | None) -> None:
         if cuda_empty_cache_steps is not None and int(cuda_empty_cache_steps) <= 0:
             raise ValueError("cuda_empty_cache_steps must be positive when provided")
         self.cuda_empty_cache_steps = None if cuda_empty_cache_steps is None else int(cuda_empty_cache_steps)
 
+    def _empty_cache_if_enabled(self) -> None:
+        if self.cuda_empty_cache_steps is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001, D401
         if self.cuda_empty_cache_steps is None:
             return control
         step = int(getattr(state, "global_step", 0) or 0)
-        if step > 0 and step % self.cuda_empty_cache_steps == 0 and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if step > 0 and step % self.cuda_empty_cache_steps == 0:
+            self._empty_cache_if_enabled()
+        return control
+
+    def on_evaluate(self, args, state, control, **kwargs):  # noqa: ANN001, D401
+        self._empty_cache_if_enabled()
         return control
 
 
@@ -554,6 +563,7 @@ def _format_startup_metadata(
             f"  - TEST_STEPS: {train_config.test_steps}",
             f"  - TEST_RECORD_COUNT: {train_config.test_record_count}",
             f"  - TEST_BATCH_SIZE: {train_config.test_batch_size}",
+            f"  - TEST_CUDA_EMPTY_CACHE_STEPS: {train_config.test_cuda_empty_cache_steps}",
             f"  - TEST_ROWS_SELECTED_THIS_RUN: {selected_test_rows}",
             f"  - TEST_ROW_SELECTION_TOTAL_AVAILABLE: {test_examples}",
         ]
@@ -695,39 +705,40 @@ def train_lora(
         if int(train_config.max_steps) > 0
         else epoch_limited_total_optimizer_steps
     )
-    callbacks = [
-        MakeSenseMonitoringCallback(
-            processor=processor,
-            test_rows=test_rows,
-            collator=data_collator,
-            output_dir=output_dir,
+    monitoring_callback = MakeSenseMonitoringCallback(
+        processor=processor,
+        test_rows=test_rows,
+        collator=data_collator,
+        output_dir=output_dir,
+        logging_dir=logging_dir,
+        test_metrics_json_name=train_config.test_metrics_json_name,
+        test_metadata=_test_metadata(
+            data_config=data_config,
+            train_config=train_config,
+            continue_plan=continue_plan,
             logging_dir=logging_dir,
-            test_metrics_json_name=train_config.test_metrics_json_name,
-            test_metadata=_test_metadata(
-                data_config=data_config,
-                train_config=train_config,
-                continue_plan=continue_plan,
-                logging_dir=logging_dir,
-                tensorboard_root=tensorboard_root,
-                train_examples=train_example_count,
-                validate_examples=validate_example_count,
-                test_examples=len(test_rows),
-            ),
-            test_steps=train_config.test_steps,
-            test_max_new_tokens=train_config.test_max_new_tokens,
-            test_record_count=train_config.test_record_count,
-            test_batch_size=train_config.test_batch_size,
-            test_output_markdown=train_config.test_output_markdown,
-            test_outputs_dir_name=train_config.test_outputs_dir_name,
-            generation_stop=train_config.generation_stop,
-            total_optimizer_steps=total_optimizer_steps,
-            enable_tensorboard=train_config.report_to == "tensorboard",
-            enable_progress=True,
-        )
-    ]
+            tensorboard_root=tensorboard_root,
+            train_examples=train_example_count,
+            validate_examples=validate_example_count,
+            test_examples=len(test_rows),
+        ),
+        test_steps=train_config.test_steps,
+        test_max_new_tokens=train_config.test_max_new_tokens,
+        test_record_count=train_config.test_record_count,
+        test_batch_size=train_config.test_batch_size,
+        test_cuda_empty_cache_steps=train_config.test_cuda_empty_cache_steps,
+        test_output_markdown=train_config.test_output_markdown,
+        test_outputs_dir_name=train_config.test_outputs_dir_name,
+        generation_stop=train_config.generation_stop,
+        total_optimizer_steps=total_optimizer_steps,
+        enable_tensorboard=train_config.report_to == "tensorboard",
+        enable_progress=True,
+    )
+    callbacks = []
     cuda_empty_cache_callback = _maybe_cuda_empty_cache_callback(train_config.cuda_empty_cache_steps)
     if cuda_empty_cache_callback is not None:
         callbacks.append(cuda_empty_cache_callback)
+    callbacks.append(monitoring_callback)
     trainer = Trainer(
         model=model,
         args=args,
@@ -739,7 +750,7 @@ def train_lora(
     trainer.remove_callback(PrinterCallback)
     trainer.remove_callback(ProgressCallback)
     trainer.remove_callback(TensorBoardCallback)
-    callbacks[0].latest_metrics.update(latest_logged_metrics_from_state(trainer.state))
+    monitoring_callback.latest_metrics.update(latest_logged_metrics_from_state(trainer.state))
 
     print(
         _format_startup_metadata(
@@ -751,7 +762,7 @@ def train_lora(
             train_examples=train_example_count,
             validate_examples=validate_example_count,
             test_examples=len(test_rows),
-            selected_test_rows=callbacks[0].tester.selected_count(),
+            selected_test_rows=monitoring_callback.tester.selected_count(),
             effective_batch_size=effective_batch_size,
             optimizer_steps_per_epoch=optimizer_steps_per_epoch,
             total_optimizer_steps=total_optimizer_steps,
@@ -784,7 +795,7 @@ def train_lora(
         else:
             trainer.train()
         trainer.save_model(str(output_dir))
-        callbacks[0].run_final_test(model=trainer.model, step=int(trainer.state.global_step))
+        monitoring_callback.run_final_test(model=trainer.model, step=int(trainer.state.global_step))
         if train_config.save_processor:
             try:
                 processor.save_pretrained(str(output_dir))

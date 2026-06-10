@@ -131,11 +131,14 @@ class StreamingSampleTester:
         generation_stop: str,
         enable_thinking: bool = False,
         test_batch_size: int = 1,
+        test_cuda_empty_cache_steps: int | None = None,
     ) -> None:
         if not generation_stop:
             raise ValueError("StreamingSampleTester requires generation_stop")
         if int(test_batch_size) <= 0:
             raise ValueError("test_batch_size must be positive")
+        if test_cuda_empty_cache_steps is not None and int(test_cuda_empty_cache_steps) <= 0:
+            raise ValueError("test_cuda_empty_cache_steps must be positive when provided")
         self.processor = processor
         self.test_rows = test_rows or []
         self.collator = collator
@@ -144,6 +147,10 @@ class StreamingSampleTester:
         self.generation_stop = generation_stop
         self.enable_thinking = enable_thinking
         self.test_batch_size = int(test_batch_size)
+        self.test_cuda_empty_cache_steps = (
+            None if test_cuda_empty_cache_steps is None else int(test_cuda_empty_cache_steps)
+        )
+        self._generate_batch_count = 0
 
     def has_rows(self) -> bool:
         return bool(self.selected_count() > 0)
@@ -306,32 +313,47 @@ class StreamingSampleTester:
         if not rendered_texts:
             return []
         batch = self.collator._call_processor(rendered_texts=rendered_texts, flat_audio_chunks=flat_audio_chunks)
-        batch = _pop_training_only_processor_keys(batch)
-        input_ids = batch.get("input_ids")
-        if not isinstance(input_ids, torch.Tensor):
-            raise ValueError("Processor output does not contain tensor input_ids for sample generation")
-        attention_mask = batch.get("attention_mask")
-        if isinstance(attention_mask, torch.Tensor):
-            prompt_lengths = [int(length) for length in attention_mask.sum(dim=1).detach().cpu().tolist()]
-        else:
-            prompt_lengths = [int(input_ids.shape[1])] * int(input_ids.shape[0])
-        batch = move_tensor_batch_to_device(batch, model_device(model))
-        generated = model.generate(
-            **batch,
-            max_new_tokens=self.test_max_new_tokens,
-            use_cache=True,
-        )
-        if not isinstance(generated, torch.Tensor):
-            sequences = getattr(generated, "sequences", None)
-            if not isinstance(sequences, torch.Tensor):
-                raise ValueError("model.generate did not return tensor sequences")
-            generated = sequences
-        padded_prompt_length = int(input_ids.shape[1])
-        output_ids: list[torch.Tensor] = []
-        for row_index, prompt_length in enumerate(prompt_lengths):
-            start = padded_prompt_length if int(generated.shape[1]) >= padded_prompt_length else prompt_length
-            output_ids.append(generated[row_index:row_index + 1, start:].detach().cpu())
-        return output_ids
+        generated: torch.Tensor | Any | None = None
+        input_ids: torch.Tensor | None = None
+        try:
+            batch = _pop_training_only_processor_keys(batch)
+            input_ids = batch.get("input_ids")
+            if not isinstance(input_ids, torch.Tensor):
+                raise ValueError("Processor output does not contain tensor input_ids for sample generation")
+            attention_mask = batch.get("attention_mask")
+            if isinstance(attention_mask, torch.Tensor):
+                prompt_lengths = [int(length) for length in attention_mask.sum(dim=1).detach().cpu().tolist()]
+            else:
+                prompt_lengths = [int(input_ids.shape[1])] * int(input_ids.shape[0])
+            padded_prompt_length = int(input_ids.shape[1])
+            batch = move_tensor_batch_to_device(batch, model_device(model))
+            generated = model.generate(
+                **batch,
+                max_new_tokens=self.test_max_new_tokens,
+                use_cache=True,
+            )
+            if not isinstance(generated, torch.Tensor):
+                sequences = getattr(generated, "sequences", None)
+                if not isinstance(sequences, torch.Tensor):
+                    raise ValueError("model.generate did not return tensor sequences")
+                generated = sequences
+            output_ids: list[torch.Tensor] = []
+            for row_index, prompt_length in enumerate(prompt_lengths):
+                start = padded_prompt_length if int(generated.shape[1]) >= padded_prompt_length else prompt_length
+                output_ids.append(generated[row_index:row_index + 1, start:].detach().cpu())
+            return output_ids
+        finally:
+            del generated
+            del input_ids
+            del batch
+            self._maybe_empty_cuda_cache_after_generate()
+
+    def _maybe_empty_cuda_cache_after_generate(self) -> None:
+        if self.test_cuda_empty_cache_steps is None:
+            return
+        self._generate_batch_count += 1
+        if self._generate_batch_count % self.test_cuda_empty_cache_steps == 0 and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def generate_turn_text(
         self,

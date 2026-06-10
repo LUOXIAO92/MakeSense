@@ -94,9 +94,10 @@ SAVE_STEPS = 300
 TEST_STEPS = 300
 TEST_MAX_NEW_TOKENS = 512
 TEST_RECORD_COUNT = -1
-TEST_BATCH_SIZE = 30
+TEST_BATCH_SIZE = 20
 TEST_OUTPUT_MARKDOWN = True
 CUDA_EMPTY_CACHE_STEPS: int | None = 1
+TEST_CUDA_EMPTY_CACHE_STEPS: int | None = None
 
 
 def load_processor():
@@ -185,6 +186,7 @@ def main() -> None:
         test_max_new_tokens=TEST_MAX_NEW_TOKENS,
         test_record_count=TEST_RECORD_COUNT,
         test_batch_size=TEST_BATCH_SIZE,
+        test_cuda_empty_cache_steps=TEST_CUDA_EMPTY_CACHE_STEPS,
         test_output_markdown=TEST_OUTPUT_MARKDOWN,
         cuda_empty_cache_steps=CUDA_EMPTY_CACHE_STEPS,
         assistant_header=ASSISTANT_HEADER,

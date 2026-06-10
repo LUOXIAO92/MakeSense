@@ -311,6 +311,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         test_max_new_tokens: int,
         test_record_count: int,
         test_batch_size: int = 1,
+        test_cuda_empty_cache_steps: int | None = None,
         test_output_markdown: bool = False,
         test_outputs_dir_name: str = "test_outputs",
         generation_stop: str,
@@ -339,6 +340,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
             test_max_new_tokens=test_max_new_tokens,
             test_record_count=test_record_count,
             test_batch_size=test_batch_size,
+            test_cuda_empty_cache_steps=test_cuda_empty_cache_steps,
             generation_stop=generation_stop,
             enable_thinking=False,
         )
