@@ -270,15 +270,15 @@ assistant
 ...
 ```
 
-## 소규모 검증 결과 (`google/gemma-4-E2B-it`, `train_examples: 96`):
+## 소규모 검증 결과 (`google/gemma-4-E2B-it`, `train_examples: 21540`):
 
 ### 학습 파라미터
 
 ```text
 Dataset
-  - TRAIN_EXAMPLES: 96
-  - VALIDATE_EXAMPLES: 18
-  - TEST_EXAMPLES: 6
+  - TRAIN_EXAMPLES: 21540
+  - VALIDATE_EXAMPLES: 2400
+  - TEST_EXAMPLES: 60
 
 Audio
   - AUDIO_SAMPLING_RATE: 16000
@@ -286,40 +286,41 @@ Audio
 
 Training Steps
   - PER_DEVICE_TRAIN_BATCH_SIZE: 1
-  - GRADIENT_ACCUMULATION_STEPS: 8
-  - EFFECTIVE_BATCH_SIZE: 8
-    `PER_DEVICE_TRAIN_BATCH_SIZE: 1 * GRADIENT_ACCUMULATION_STEPS: 8`
-  - OPTIMIZER_STEPS_PER_EPOCH: 12
-    `ceil(TRAIN_EXAMPLES: 96 / EFFECTIVE_BATCH_SIZE: 8)`
-  - CONFIGURED_NUM_TRAIN_EPOCHS: 20
+  - PER_DEVICE_EVAL_BATCH_SIZE: 5
+  - GRADIENT_ACCUMULATION_STEPS: 16
+  - EFFECTIVE_BATCH_SIZE: 16
+    `PER_DEVICE_TRAIN_BATCH_SIZE: 1 * GRADIENT_ACCUMULATION_STEPS: 16`
+  - OPTIMIZER_STEPS_PER_EPOCH: 1347
+    `ceil(TRAIN_EXAMPLES: 21540 / EFFECTIVE_BATCH_SIZE: 16)`
+  - CONFIGURED_NUM_TRAIN_EPOCHS: 5
   - CONFIGURED_MAX_STEPS: -1
-  - TOTAL_OPTIMIZER_STEPS: 240
-    `OPTIMIZER_STEPS_PER_EPOCH: 12 * CONFIGURED_NUM_TRAIN_EPOCHS: 20`
+  - TOTAL_OPTIMIZER_STEPS: 6735
+    `OPTIMIZER_STEPS_PER_EPOCH: 1347 * CONFIGURED_NUM_TRAIN_EPOCHS: 5`
 
 Hyper Parmeters
-  - LEARNING_RATE: 1e-4
+  - LEARNING_RATE: 2e-4
   - WEIGHT_DECAY: 0.0
   - ADAM_BETA1: 0.9
   - ADAM_BETA2: 0.999
   - MAX_GRAD_NORM: 1.0
-  - NUM_TRAIN_EPOCHS: 20
+  - NUM_TRAIN_EPOCHS: 5 (stop at 5400 step)
 ```
 
 ### 결과
 
 #### 지표
 
-아래 엄격한 스트리밍 테스트 지표들은 주로 스트리밍 대화에서 모델의 출력 형식과 출력 여부 판단을 확인하기 위한 것입니다. 출력이 `<src>...</src><tgt>...</tgt>` 프로토콜을 지키는지, 생성이 의도한 정지 토큰에서 멈추는지, 각 어시스턴트 턴에서 원문 쪽 / 번역문 쪽이 기다려야 하는지 아니면 내용을 내보내야 하는지를 평가합니다. ASR 텍스트가 글자 단위로 맞는지, 번역 의미가 정확한지를 직접 측정하는 지표는 아닙니다.
+아래 엄격한 스트리밍 테스트 지표들은 주로 스트리밍 대화에서 모델의 출력 형식과 출력 여부 판단을 확인하기 위한 것입니다. 출력이 프로토콜 단위(ASR-only `<src>...</src>` 또는 번역 `<src>...</src><tgt>...</tgt>`)를 지키는지, 생성이 의도한 정지 토큰에서 멈추는지, 각 어시스턴트 턴에서 원문 쪽 / 번역문 쪽이 기다려야 하는지 아니면 내용을 내보내야 하는지를 평가합니다. ASR 텍스트가 글자 단위로 맞는지, 번역 의미가 정확한지를 직접 측정하는 지표는 아닙니다.
 
 **POSTPROCESSED_TURN_STOP_RATE**
 
-- 의미: 후처리된 출력이 불필요한 꼬리 문자열 없이 완전한 프로토콜 출력으로 남아 있는 비율입니다.
-- 계산: `postprocessed_turn_stop_turns / TURN_COUNT`. 후처리된 텍스트가 프로토콜상 유효하고, 정규화된 `<src>...</src><tgt>...</tgt>` 출력과 정확히 일치하면 해당 턴을 성공으로 셉니다.
+- 의미: 후처리된 출력이 닫힌 프로토콜 태그 경계에서 깨끗하게 멈춘 비율입니다.
+- 계산: `postprocessed_turn_stop_turns / TURN_COUNT`. 파싱된 프로토콜 단위 뒤에 공백 또는 허용된 EOS / 생성 정지 마커만 남아 있으면 해당 턴을 성공으로 셉니다. 닫힌 프로토콜 태그 바깥에 EOS가 아닌 내용(꼬리 텍스트, 쉼표로 분리된 태그, 반복된 프로토콜 조각 등)이 있으면 이 지표에서는 실패입니다.
 
 **PROTOCOL_VALID_RATE**
 
-- 의미: 모델 출력이 요구된 프로토콜을 지킨 비율입니다.
-- 계산: `protocol_valid_turns / TURN_COUNT`. 출력은 `<src>...</src><tgt>...</tgt>` 형식과 일치해야 하며, 원문 쪽 / 번역문 쪽 내용 안에 `<src>`, `</src>`, `<tgt>`, `</tgt>` 같은 태그가 다시 중첩되어 있으면 안 됩니다.
+- 의미: 모델 출력의 원문 / 번역문 프로토콜 태그가 합법적인 비율입니다.
+- 계산: `protocol_valid_turns / TURN_COUNT`. 출력이 합법적인 ASR-only 단위 `<src>...</src>` 또는 번역 단위 `<src>...</src><tgt>...</tgt>`로 시작하고, 태그가 쌍을 이루며, 순서가 올바르고, 각 필드 내부에 `<src>`, `</src>`, `<tgt>`, `</tgt>` 같은 태그가 중첩되어 있지 않으면 유효한 것으로 셉니다. 이 지표는 태그 구조의 합법성만 확인합니다. 닫힌 프로토콜 단위 뒤에 태그 밖 내용이 이어지는지는 `POSTPROCESSED_TURN_STOP_RATE`가 평가합니다.
 
 **RAW_TURN_STOP_RATE**
 
@@ -376,324 +377,346 @@ Hyper Parmeters
 - 의미: 선택된 모든 테스트 레코드에서 실제로 평가한 어시스턴트 턴의 총수입니다.
 - 계산: `records` 안에서 생성 및 평가 대상이 된 어시스턴트 출력을 모두 합산합니다.
 
-#### 50단계 테스트 출력
+#### 300단계 테스트 출력
 
 - 허용 창 크기: 1.0초
 - 아래는 소규모 테스트 결과입니다. 왼쪽은 정답, 오른쪽은 모델 출력입니다.
 
 ```text
 Test Metrics
-  - STEP: 50
-  - TOTAL_AVAILABLE_TEST_ROWS: 6
-  - SELECTED_TEST_ROWS: 6
+  - STEP: 300
+  - TOTAL_AVAILABLE_TEST_ROWS: 60
+  - SELECTED_TEST_ROWS: 60
   - POSTPROCESSED_TURN_STOP_RATE: 1.0000
   - PROTOCOL_VALID_RATE: 1.0000
   - RAW_TURN_STOP_RATE: 1.0000
-  - RECORD_COUNT: 6
-  - SRC_RELEASE_ACCURACY: 0.9067
-  - SRC_RELEASE_TOTAL: 75
-  - SRC_WAIT_ACCURACY: 0.2857
-  - SRC_WAIT_TOTAL: 14
-  - TGT_RELEASE_ACCURACY: 0.3000
-  - TGT_RELEASE_TOTAL: 20
-  - TGT_WAIT_ACCURACY: 0.7536
-  - TGT_WAIT_TOTAL: 69
-  - TURN_COUNT: 89
+  - RECORD_COUNT: 60
+  - SRC_RELEASE_ACCURACY: 0.9443
+  - SRC_RELEASE_TOTAL: 718
+  - SRC_WAIT_ACCURACY: 0.2450
+  - SRC_WAIT_TOTAL: 151
+  - TGT_RELEASE_ACCURACY: 0.7248
+  - TGT_RELEASE_TOTAL: 298
+  - TGT_WAIT_ACCURACY: 0.7996
+  - TGT_WAIT_TOTAL: 489
+  - TURN_COUNT: 869
 
 ---
 
-## Test Example 1 / 6
+## Test Example 2 / 60
 
-  - UID: JA__gKKQYSi4mg_W000167
-  - SYSTEM_PROMPT: Translate to English, tolerance window size is 2
+  - UID: EN_nLFyRxIRQBo_W000057
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Japanese. Tolerance window size is 2.
 
-1. <src>あの</src><tgt><|wait|></tgt>  -  <src>あのー</src><tgt><|wait|></tgt>
-2. <src>測量した</src><tgt><|wait|></tgt>  -  <src>所乗しました</src><tgt><|wait|></tgt>
-3. <src><|wait|></src><tgt>This is the survey</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-4. <src>データになります。</src><tgt><|wait|></tgt>  -  <src>データに</src><tgt><|wait|></tgt>
-5. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>こういったデータ</src><tgt><|wait|></tgt>
-6. <src>こういったデータであったり、</src><tgt>data. You can see data like this—</tgt>  -  <src>こういったデータがあったり</src><tgt><|wait|></tgt>
-7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>これは</src><tgt><|wait|></tgt>
-8. <src>これは</src><tgt><|wait|></tgt>  -  <src>これは中野県の</src><tgt><|wait|></tgt>
-9. <src>奈良県の</src><tgt>this one, for example,</tgt>  -  <src>奈良県。</src><tgt><|wait|></tgt>
-10. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-11. <src>工事なんですけど。</src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-
----
-
-## Test Example 2 / 6
-
-  - UID: EN_nIpxsCym-BM_W000211
-  - SYSTEM_PROMPT: Translate to Korean, tolerance window size is 3
-
-1. <src>By default, </src><tgt><|wait|></tgt>  -  <src>Um, </src><tgt><|wait|></tgt>
-2. <src>if you create </src><tgt><|wait|></tgt>  -  <src>if you create a fail, </src><tgt><|wait|></tgt>
-3. <src>a file </src><tgt><|wait|></tgt>  -  <src>a file, </src><tgt>기본적으로 파일 생성 시, </tgt>
-4. <src>called source/index, </src><tgt>기본적으로 source/index라는 파일을 만들면,</tgt>  -  <src>called course </src><tgt><|wait|></tgt>
-5. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>so the index </src><tgt><|wait|></tgt>
-6. <src>it's then going to push </src><tgt><|wait|></tgt>  -  <src>it's then going to push </src><tgt>그것을 푸시 하면,</tgt>
-7. <src>whatever you put in </src><tgt><|wait|></tgt>  -  <src>whatever you put </src><tgt><|wait|></tgt>
-8. <src>that file, </src><tgt>그 안에 담긴 내용이나</tgt>  -  <src>that file, </src><tgt><|wait|></tgt>
-9. <src>any imports you use, </src><tgt><|wait|></tgt>  -  <src>any imports you use. </src><tgt><|wait|></tgt>
-10. <src>things like that, </src><tgt><|wait|></tgt>  -  <src>think </src><tgt><|wait|></tgt>
-11. <src>out to. </src><tgt><|wait|></tgt>  -  <src>to use. </src><tgt><|wait|></tgt>
+1. <src>These people are </src><tgt><|wait|></tgt>  -  <src>These people are </src><tgt><|wait|></tgt>
+2. <src>completely rare, </src><tgt><|wait|></tgt>  -  <src>completely rare. </src><tgt><|wait|></tgt>
+3. <src>and they often </src><tgt>こうした人々は非常に稀です。そして、</tgt>  -  <src>And they often </src><tgt>これは完全に珍しいんです。そして、</tgt>
+4. <src>show up to </src><tgt><|wait|></tgt>  -  <src>show up </src><tgt><|wait|></tgt>
+5. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>to completely revolution- </src><tgt><|wait|></tgt>
+6. <src>completely revolutionize the world. </src><tgt>世界を根本から変えるような存在であることがよくあります。</tgt>  -  <src>ize the world. </src><tgt>世界を完全に根底から覆す人たちがよく登場します。</tgt>
+7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>The personality </src><tgt><|wait|></tgt>
+8. <src>Their personality is </src><tgt><|wait|></tgt>  -  <src>is something </src><tgt><|wait|></tgt>
+9. <src>something of a </src><tgt>彼らの性格は</tgt>  -  <src>of a contradiction. </src><tgt>彼らの個性は、ある種の矛盾をはらんでいます。</tgt>
+10. <src>contradiction. </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+11. <src>While they're </src><tgt><|wait|></tgt>  -  <src>While they're extroverted, </src><tgt><|wait|></tgt>
+12. <src>extroverted, </src><tgt>矛盾しています。外交的である一方、</tgt>  -  <src>they also </src><tgt>外向的であるにもかかわらず、彼らは</tgt>
+13. <src>they also hate </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+14. <src>meaningless conversations </src><tgt><|wait|></tgt>  -  <src>hate meaningless conversations. </src><tgt><|wait|></tgt>
+15. <src>and like to </src><tgt>無意味な会話は嫌います。そして、</tgt>  -  <src>And like </src><tgt>無意味な会話を嫌う、</tgt>
+16. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>it gets straight to the </src><tgt><|wait|></tgt>
+17. <src>get straight to the point. </src><tgt><|wait|></tgt>  -  <src>point. </src><tgt><|wait|></tgt>
+18. <src>They also love to </src><tgt>要点を突くのを好みます。また、</tgt>  -  <src>They also love to </src><tgt>まっすぐ本題に入りたいのです。彼らはまた</tgt>
+19. <src>play </src><tgt><|wait|></tgt>  -  <src>play the devil's advocate, </src><tgt><|wait|></tgt>
+20. <src>the devil's advocate, and they </src><tgt><|wait|></tgt>  -  <src>and </src><tgt><|wait|></tgt>
+21. <src><|wait|></src><tgt>あえて悪魔の代弁者を演じることを好み、</tgt>  -  <src>never shy away </src><tgt>逆説を好むし、</tgt>
+22. <src>never shy away from a debate. </src><tgt><|wait|></tgt>  -  <src>from a debate. </src><tgt><|wait|></tgt>
+23. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+24. <src><|wait|></src><tgt>議論を避けることはありません。</tgt>  -  <src>EHCPS </src><tgt>議論を避けることは決してありません。EHCPSの</tgt>
+25. <src>ENTP stands for </src><tgt><|wait|></tgt>  -  <src>stand for. </src><tgt><|wait|></tgt>
 
 ---
 
-## Test Example 3 / 6
+## Test Example 9 / 60
 
-  - UID: ZH_UJBZXO0vtl8_W000127
-  - SYSTEM_PROMPT: Translate to Korean, tolerance window size is 5
+  - UID: EN_nSOXneMb4Ec_W000365
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Keep at least 3 wait windows before each target release.
 
-1. <src>同样也是</src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-2. <src>针对要留意</src><tgt><|wait|></tgt>  -  <src>正在流溢引起经济</src><tgt><|wait|></tgt>
-3. <src>金钱的部分，</src><tgt><|wait|></tgt>  -  <src>资金的阶段部分。 </src><tgt><|wait|></tgt>
-4. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>我们从这里，</src><tgt>똑같이 돈 문제가 있는데 그 부분을 주의해야 한다. 그 얘기는 여기서부터 하는 거지.</tgt>
-5. <src>我们从这里呢可以</src><tgt><|wait|></tgt>  -  <src>我们从这里，</src><tgt><|wait|></tgt>
-6. <src>看到的是</src><tgt>마찬가지로 금전적인 부분에서 주의할 점인데,</tgt>  -  <src>看到的是</src><tgt><|wait|></tgt>
-7. <src>这一副卡片，</src><tgt><|wait|></tgt>  -  <src>这一卡片</src><tgt>이 카드를 보니까</tgt>
-8. <src>它代表的是</src><tgt><|wait|></tgt>  -  <src>它代表的是</src><tgt>이 카드가 상징하는 것을 볼 수 있죠.</tgt>
-9. <src>手。</src><tgt><|wait|></tgt>  -  <src>这双收。</src><tgt><|wait|></tgt>
-10. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt>이 카드가 의미하는 것은 손을 쥐고 있는 것입니다.</tgt>
-11. <src>那么手的时候呢，</src><tgt><|wait|></tgt>  -  <src>手呢，</src><tgt><|wait|></tgt>
-12. <src>通常它</src><tgt>이 카드는 손을 의미합니다. 손은</tgt>  -  <src>通常，啊，</src><tgt><|wait|></tgt>
-13. <src>非常的</src><tgt><|wait|></tgt>  -  <src>常常害怕写的。</src><tgt><|wait|></tgt>
-14. <src>直白，代表是</src><tgt><|wait|></tgt>  -  <src>比较指白，</src><tgt>만약 손을 가질 때는</tgt>
-15. <src>我们的金钱</src><tgt><|wait|></tgt>  -  <src>我们的金钱</src><tgt><|wait|></tgt>
-16. <src>呢，可能就</src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-17. <src>尽量呢</src><tgt><|wait|></tgt>  -  <src>拿到，可能就</src><tgt><|wait|></tgt>
-18. <src>不要，</src><tgt>아주 직설적인 카드라 돈과 관련해</tgt>  -  <src>不去。</src><tgt><|wait|></tgt>
-19. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>就不是</src><tgt>관련해 최대한 지키려고 노력하는 게 좋을 것 같습니다. 이것은</tgt>
-20. <src>就是做太多的</src><tgt><|wait|></tgt>  -  <src>就是说太多的。</src><tgt><|wait|></tgt>
-21. <src>规划，</src><tgt><|wait|></tgt>  -  <src>规划。</src><tgt><|wait|></tgt>
-22. <src>尤其是</src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-23. <src>针对家中</src><tgt><|wait|></tgt>  -  <src>正宗的，</src><tgt><|wait|></tgt>
-24. <src>的男性</src><tgt>너무 많은 계획을 세우지 않는 게 좋다는 뜻인데요,</tgt>  -  <src>的女性</src><tgt>과도한 계획은 특히 가정의 여성들이</tgt>
-25. <src>长男。</src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+2. <src>Meaningful individual </src><tgt><|wait|></tgt>  -  <src>Meaningful individual </src><tgt><|wait|></tgt>
+3. <src>right, </src><tgt><|wait|></tgt>  -  <src>right, </src><tgt><|wait|></tgt>
+4. <src>and the Supreme Court </src><tgt>有意义的个人权利，而最高法院</tgt>  -  <src>and the Supreme Court </src><tgt>有意义的个体权利，</tgt>
+5. <src>came along </src><tgt><|wait|></tgt>  -  <src>came along last, </src><tgt><|wait|></tgt>
+6. <src>last, not leading. </src><tgt><|wait|></tgt>  -  <src>not leading. </src><tgt><|wait|></tgt>
+7. <src>And I don't think the courts want to be </src><tgt><|wait|></tgt>  -  <src>And I don't I don't think the courts want to be </src><tgt><|wait|></tgt>
+8. <src><|wait|></src><tgt>是最后才介入的，不是引领者。我不认为</tgt>  -  <src>the </src><tgt>法院总是最后一个加入的。我个人认为，</tgt>
+9. <src>the the vanguard of social </src><tgt><|wait|></tgt>  -  <src>vanard of social </src><tgt><|wait|></tgt>
+10. <src>change </src><tgt><|wait|></tgt>  -  <src>change, </src><tgt><|wait|></tgt>
+11. <src>these days, </src><tgt><|wait|></tgt>  -  <src>these days. </src><tgt><|wait|></tgt>
+12. <src><|wait|></src><tgt>法院现在想成为社会变革的先锋，</tgt>  -  <src>But they rather </src><tgt>这些天似乎不想成为社会变革的典范。但他们更</tgt>
+13. <src>but they rather reflect </src><tgt><|wait|></tgt>  -  <src>reflect the </src><tgt><|wait|></tgt>
+14. <src>the consensus </src><tgt><|wait|></tgt>  -  <src>consensus. </src><tgt><|wait|></tgt>
+15. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>That's already </src><tgt><|wait|></tgt>
+16. <src>that's already emerged. </src><tgt>它们更倾向于反映已经形成的共识。</tgt>  -  <src>emerged. </src><tgt>选择反映已经形成的共识。</tgt>
+17. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>So. </src><tgt><|wait|></tgt>
+18. <src>So you have some </src><tgt><|wait|></tgt>  -  <src>You have </src><tgt><|wait|></tgt>
+19. <src>federal judges </src><tgt><|wait|></tgt>  -  <src>some federal judges </src><tgt><|wait|></tgt>
+20. <src><|wait|></src><tgt>所以，有些联邦法官……</tgt>  -  <src>who </src><tgt><|wait|></tgt>
+21. <src>who. </src><tgt><|wait|></tgt>  -  <src>who </src><tgt><|wait|></tgt>
 
 ---
 
-## Test Example 4 / 6
+## Test Example 32 / 60
 
-  - UID: ZH_B00021_S00398_W000012
-  - SYSTEM_PROMPT: Translate to English, tolerance window size is 4
+  - UID: ZH_B00041_S00155_W000028
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English.
 
-1. <src>三月二十二号，</src><tgt><|wait|></tgt>  -  <src>3-22</src><tgt><|wait|></tgt>
-2. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>法国政权</src><tgt>March 22nd, France’s current regime</tgt>
-3. <src>美国证券交易委员会宣布对</src><tgt><|wait|></tgt>  -  <src>国众权交议委员会宣布对内，</src><tgt>On March 22nd, the National Legislative Council announced that it will... <|wait|></tgt>
-4. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>海 密资产欺诈</src><tgt><|wait|></tgt>
-5. <src>加密资产企业家孙宇晨</src><tgt>On March 22nd, the U.S. Securities and Exchange Commission</tgt>  -  <src>亚马逊资产齐</src><tgt><|wait|></tgt>
-6. <src>及其三家</src><tgt><|wait|></tgt>  -  <src>积资参加</src><tgt><|wait|></tgt>
-7. <src>全资公司</src><tgt><|wait|></tgt>  -  <src>子公司，提及了</src><tgt><|wait|></tgt>
-8. <src>提起诉讼，</src><tgt><|wait|></tgt>  -  <src>旗</i>计出售，</src><tgt><|wait|></tgt>
-9. <src>指控他们没有经过注册</src><tgt><|wait|></tgt>  -  <src>指控他们没有任何经过</src><tgt>filed a lawsuit, accusing</tgt>
-10. <src>提供和出售</src><tgt>announced a lawsuit against crypto entrepreneur Justin Sun and three of his companies, alleging that they offered and sold</tgt>  -  <src><|wait|></src><tgt>filed a lawsuit against crypto asset entrepreneur</tgt>
-11. <src>加密资产</src><tgt><|wait|></tgt>  -  <src>加密资产证券。</src><tgt><|wait|></tgt>
-12. <src>证券Tronics</src><tgt><|wait|></tgt>  -  <src>证券，</src><tgt>unregistered securities.</tgt>
-13. <src>和BitTorrent。</src><tgt><|wait|></tgt>  -  <src>和Tarant</src><tgt><|wait|></tgt>
+1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>家长需要</src><tgt>Parents need to</tgt>
+2. <src>家长需要做的是，</src><tgt>What parents need to do is this:</tgt>  -  <src>做的是</src><tgt>do the following:</tgt>
+3. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>用我们</src><tgt><|wait|></tgt>
+4. <src>用我们深深的</src><tgt><|wait|></tgt>  -  <src>身上的爱</src><tgt>use the love in our own hearts</tgt>
+5. <src>爱浇水、</src><tgt><|wait|></tgt>  -  <src>交世界，</src><tgt>to make love happen.</tgt>
+6. <src>施肥，</src><tgt>water and fertilize with our deep love,</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+7. <src>给足</src><tgt><|wait|></tgt>  -  <src>可以做</src><tgt><|wait|></tgt>
+8. <src>孩子心理营养，</src><tgt>give children enough psychological nourishment,</tgt>  -  <src>孩子心里的影响力。</src><tgt>That is the influence</tgt>
+9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>以内心，</src><tgt>that we want to instill in our children</tgt>
+10. <src>并耐心等待孩子</src><tgt>and wait patiently for</tgt>  -  <src>等他孩子</src><tgt><|wait|></tgt>
+11. <src>慢慢长大。</src><tgt>them to grow slowly.</tgt>  -  <src>慢慢长大。</src><tgt>as they grow up: by teaching them how to share their hearts.</tgt>
 
 ---
 
-## Test Example 5 / 6
+## Test Example 40 / 60
 
-  - UID: ZH_NWf8Wc2GVvM_W000007
-  - SYSTEM_PROMPT: Translate to Japanese, tolerance window size is 1
+  - UID: JA_Xv3zO_K9SuU_W000011
+  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
 
-1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>石</src><tgt><|wait|></tgt>
-2. <src>启示录和</src><tgt>『ヨハネの黙示録』と</tgt>  -  <src>खीस ही रूस,</src><tgt><|wait|></tgt>
-3. <src>翡翠石板</src><tgt><|wait|></tgt>  -  <src>首页</src><tgt>その巻第一章では</tgt>
-4. <src>都曾经预测到，</src><tgt>『エメラルド・タブレット』のどちらもが予言していたことがあります。</tgt>  -  <src>都成为</src><tgt>翡翠石板。</tgt>
-5. <src>这十四万四千名</src><tgt><|wait|></tgt>  -  <src>那这四千万</src><tgt><|wait|></tgt>
-6. <src>光之工作者</src><tgt>それは、14万4000人のライトワーカーが</tgt>  -  <src>十字工作者的道路。</src><tgt><|wait|></tgt>
-7. <src>的到来，会</src><tgt><|wait|></tgt>  -  <src>的到来，将会</src><tgt><|wait|></tgt>
-8. <src>在卡利年代</src><tgt>到来し、カリ・ユガの</tgt>  -  <src>在下一个</src><tgt>来ることを</tgt>
-9. <src>结束时，</src><tgt><|wait|></tgt>  -  <src>结束时，将</src><tgt>終わりを迎えるときに、</tgt>
-10. <src>将地球</src><tgt>終わりに地球を</tgt>  -  <src>将</src><tgt>終結までに</tgt>
-11. <src>从黑暗势力的手中</src><tgt><|wait|></tgt>  -  <src>从黑石里的手</src><tgt>破壊するでしょう。</tgt>
-12. <src>拯救出来。</src><tgt>闇の勢力から救い出すということです。</tgt>  -  <src>拯救出来。</src><tgt>ダークパワーの手から救い出す</tgt>
+1. <src>そうです。</src>  -  <src>そうですね、</src>
+2. <src>そこで</src>  -  <src>そこで</src>
+3. <src><|wait|></src>  -  <src>っていう</src>
+4. <src>テキという設備寺が</src>  -  <src>設定</src>
+5. <src>ありましたね。</src>  -  <src>済みか読みましたね</src>
+6. <src>で、</src>  -  <src>って。</src>
+7. <src><|wait|></src>  -  <src><|wait|></src>
+8. <src>長井慶義氏の仕組み</src>  -  <src>細井親父の</src>
+9. <src><|wait|></src>  -  <src>仕組みは</src>
+10. <src>は五経、</src>  -  <src>元</src>
+11. <src><|wait|></src>  -  <src>設定</src>
+12. <src>設備寺、五比</src>  -  <src>済み？</src>
+13. <src>です。</src>  -  <src>合図。</src>
 
 ---
 
-## Test Example 6 / 6
+## Test Example 48 / 60
 
-  - UID: ZH_Y4xRc2amPxY_W000024
-  - SYSTEM_PROMPT: Translate to Korean, tolerance window size is 4
+  - UID: EN_n_COVPwr54I_W000006
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Korean. Keep at least 1 wait windows before each target release.
 
-1. <src>就会</src><tgt><|wait|></tgt>  -  <src>就会</src><tgt><|wait|></tgt>
-2. <src>消耗我们</src><tgt><|wait|></tgt>  -  <src>像 </src><tgt><|wait|></tgt>
-3. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>的身体</src><tgt><|wait|></tgt>
-4. <src>身体骨骼当中的</src><tgt><|wait|></tgt>  -  <src>去库存</src><tgt><|wait|></tgt>
-5. <src>矿物质，更多的</src><tgt>우리 몸은 뼈 속의 미네랄을 소모하게 되고, 더 많은</tgt>  -  <src>钙质消耗</src><tgt><|wait|></tgt>
-6. <src>靠物矿物质。</src><tgt><|wait|></tgt>  -  <src>矿物这种</src><tgt><|wait|></tgt>
-7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-8. <src>所以呢，</src><tgt><|wait|></tgt>  -  <src>所以呢，</src><tgt>무기물 미네랄이 소모되기 때문에</tgt>
-9. <src>这个肥胖人</src><tgt><|wait|></tgt>  -  <src>吃蛋白质，</src><tgt>그리고 단백질을 섭취하면</tgt>
-10. <src>往往都会有</src><tgt>미네랄을 필요로 하게 됩니다. 그래서 비만인 분들은</tgt>  -  <src>甩胖人</src><tgt><|wait|></tgt>
-11. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>这个</src><tgt><|wait|></tgt>
-12. <src>这种关节</src><tgt><|wait|></tgt>  -  <src>这个</src><tgt><|wait|></tgt>
-13. <src>和软组织</src><tgt><|wait|></tgt>  -  <src>关节</src><tgt><|wait|></tgt>
-14. <src>的问题，就是</src><tgt><|wait|></tgt>  -  <src>的限制，就是因为</src><tgt><|wait|></tgt>
-15. <src>因为什么？</src><tgt>관절이나 연조직 문제를 자주 겪는데요. 왜 그럴까요?</tgt>  -  <src>因为</src><tgt><|wait|></tgt>
-16. <src>就是消耗了</src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-17. <src>太多的矿物质。</src><tgt><|wait|></tgt>  -  <src>太多</src><tgt><|wait|></tgt>
+1. <src>My name is </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+2. <src>Kerenath Dettig. </src><tgt>제 이름은 케레나스 데티그입니다.</tgt>  -  <src>My name is Jinah Tree,</src><tgt>제 이름은 진아 트리예요. 저는</tgt>
+3. <src>I am currently </src><tgt><|wait|></tgt>  -  <src>I am currently studying</src><tgt><|wait|></tgt>
+4. <src><|wait|></src><tgt>저는 현재</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+5. <src>studying a Bachelor of Finance </src><tgt><|wait|></tgt>  -  <src>AABX, back roll finance, and AABX</src><tgt>AABX, 배경 투자, 그리고 AABX를 지금 공부하고 있고요.</tgt>
+6. <src>and a Bachelor of Psychology </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>of psychology, here at </src><tgt>심리학자들을 여기서</tgt>
+8. <src>here at the ANU, </src><tgt>호주국립대학교( ANU) 에서 금융학과 심리학 학사 과정을</tgt>  -  <src>Jianyu, </src><tgt><|wait|></tgt>
+9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt>Jianyu에서 배웠어요. 심리학자</tgt>
+10. <src>and in the future, I want to go into </src><tgt>밟고 있고요, 앞으로는</tgt>  -  <src>and in the future, </src><tgt><|wait|></tgt>
+11. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>I want to go into corporate consulting </src><tgt>들도요. 미래에는 기업 자문가로</tgt>
+12. <src>corporate consultancy. </src><tgt>기업 컨설팅 쪽으로 가고 싶습니다.</tgt>  -  <src>or </src><tgt><|wait|></tgt>
+
+---
+
+## Test Example 54 / 60
+
+  - UID: ZH_W0NbyT5Ak-A_W000071
+  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
+
+1. <src>弗洛伊德</src>  -  <src>Four in </src>
+2. <src>首次觉知到</src>  -  <src>the subject had</src>
+3. <src>那个现象：</src>  -  <src>solved that problem.</src>
+4. <src>每当我们</src>  -  <src>But we, </src>
+5. <src><|wait|></src>  -  <src>in our pursuit of </src>
+6. <src>处于爱之中，</src>  -  <src>love, we</src>
+7. <src>所谓的爱，</src>  -  <src>find</src>
+8. <src>我们也</src>  -  <src>the other love</src>
+9. <src>同时进入恨。</src>  -  <src>that has entered</src>
+10. <src><|wait|></src>  -  <src>the heart</src>
+11. <src>在早上的时候，</src>  -  <src>when we are seeking, that</src>
+12. <src>它是爱；</src>  -  <src>is that love.</src>
+13. <src>到了晚上，</src>  -  <src>The end result</src>
+14. <src>它就变成恨。</src>  -  <src>is that, it turns into</src>
+15. <src><|wait|></src>  -  <src>that</src>
+16. <src>那个钟摆</src>  -  <src>love.</src>
+17. <src><|wait|></src>  -  <src>It continues to grow</src>
+18. <src>继续在移动。</src>  -  <src>and and.</src>
 ```
 
 
-#### 240단계 최종 테스트 출력
+#### 5400단계 최종 테스트 출력
 
 ```text
 Test Metrics
-  - STEP: 240
-  - TOTAL_AVAILABLE_TEST_ROWS: 6
-  - SELECTED_TEST_ROWS: 6
+  - STEP: 5400
+  - TOTAL_AVAILABLE_TEST_ROWS: 60
+  - SELECTED_TEST_ROWS: 60
   - POSTPROCESSED_TURN_STOP_RATE: 1.0000
   - PROTOCOL_VALID_RATE: 1.0000
   - RAW_TURN_STOP_RATE: 1.0000
-  - RECORD_COUNT: 6
-  - SRC_RELEASE_ACCURACY: 0.9867
-  - SRC_RELEASE_TOTAL: 75
-  - SRC_WAIT_ACCURACY: 1.0000
-  - SRC_WAIT_TOTAL: 14
-  - TGT_RELEASE_ACCURACY: 0.8000
-  - TGT_RELEASE_TOTAL: 20
-  - TGT_WAIT_ACCURACY: 0.9130
-  - TGT_WAIT_TOTAL: 69
-  - TURN_COUNT: 89
+  - RECORD_COUNT: 60
+  - SRC_RELEASE_ACCURACY: 0.9610
+  - SRC_RELEASE_TOTAL: 718
+  - SRC_WAIT_ACCURACY: 0.7219
+  - SRC_WAIT_TOTAL: 151
+  - TGT_RELEASE_ACCURACY: 0.8725
+  - TGT_RELEASE_TOTAL: 298
+  - TGT_WAIT_ACCURACY: 0.8896
+  - TGT_WAIT_TOTAL: 489
+  - TURN_COUNT: 869
 
 ---
 
-## Test Example 1 / 6
+## Test Example 2 / 60
 
-  - UID: JA__gKKQYSi4mg_W000167
-  - SYSTEM_PROMPT: Translate to English, tolerance window size is 2
+  - UID: EN_nLFyRxIRQBo_W000057
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Japanese. Tolerance window size is 2.
 
-1. <src>あの</src><tgt><|wait|></tgt>  -  <src>あの</src><tgt><|wait|></tgt>
-2. <src>測量した</src><tgt><|wait|></tgt>  -  <src>測量した</src><tgt><|wait|></tgt>
-3. <src><|wait|></src><tgt>This is the survey</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-4. <src>データになります。</src><tgt><|wait|></tgt>  -  <src>データになります。</src><tgt><|wait|></tgt>
+1. <src>These people are </src><tgt><|wait|></tgt>  -  <src>These people are </src><tgt><|wait|></tgt>
+2. <src>completely rare, </src><tgt><|wait|></tgt>  -  <src>completely rare, </src><tgt><|wait|></tgt>
+3. <src>and they often </src><tgt>こうした人々は非常に稀です。そして、</tgt>  -  <src>and they often </src><tgt>これらの人々は非常に稀です。そして、</tgt>
+4. <src>show up to </src><tgt><|wait|></tgt>  -  <src>show up to </src><tgt><|wait|></tgt>
 5. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-6. <src>こういったデータであったり、</src><tgt>data. You can see data like this—</tgt>  -  <src>こういったデータであったり、</src><tgt>data we've collected— things like this, or</tgt>
+6. <src>completely revolutionize the world. </src><tgt>世界を根本から変えるような存在であることがよくあります。</tgt>  -  <src>completely revolutionize the world. </src><tgt>世界の完全な革命を起こすためにしばしば現れます。</tgt>
 7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-8. <src>これは</src><tgt><|wait|></tgt>  -  <src>これは</src><tgt><|wait|></tgt>
-9. <src>奈良県の</src><tgt>this one, for example,</tgt>  -  <src>奈良県の</src><tgt>this is</tgt>
-10. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-11. <src>工事なんですけど。</src><tgt><|wait|></tgt>  -  <src>工事なんですけど。</src><tgt><|wait|></tgt>
+8. <src>Their personality is </src><tgt><|wait|></tgt>  -  <src>Their personality is </src><tgt><|wait|></tgt>
+9. <src>something of a </src><tgt>彼らの性格は</tgt>  -  <src>something of a contradiction. </src><tgt>彼らの性格は矛盾していることも特徴です。</tgt>
+10. <src>contradiction. </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+11. <src>While they're </src><tgt><|wait|></tgt>  -  <src>While they're </src><tgt><|wait|></tgt>
+12. <src>extroverted, </src><tgt>矛盾しています。外交的である一方、</tgt>  -  <src>extroverted, </src><tgt>外向的であるだけでなく、</tgt>
+13. <src>they also hate </src><tgt><|wait|></tgt>  -  <src>they also hate </src><tgt><|wait|></tgt>
+14. <src>meaningless conversations </src><tgt><|wait|></tgt>  -  <src>meaningless conversations </src><tgt><|wait|></tgt>
+15. <src>and like to </src><tgt>無意味な会話は嫌います。そして、</tgt>  -  <src><|wait|></src><tgt>無意味な会話を嫌い、</tgt>
+16. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>and like to get straight to </src><tgt><|wait|></tgt>
+17. <src>get straight to the point. </src><tgt><|wait|></tgt>  -  <src>the point. </src><tgt><|wait|></tgt>
+18. <src>They also love to </src><tgt>要点を突くのを好みます。また、</tgt>  -  <src>They also love to </src><tgt>すぐ本題に入りたいと考えます。また、</tgt>
+19. <src>play </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+20. <src>the devil's advocate, and they </src><tgt><|wait|></tgt>  -  <src>play the devil's advocate, </src><tgt><|wait|></tgt>
+21. <src><|wait|></src><tgt>あえて悪魔の代弁者を演じることを好み、</tgt>  -  <src><|wait|></src><tgt>悪魔の代弁をするのも好きです。</tgt>
+22. <src>never shy away from a debate. </src><tgt><|wait|></tgt>  -  <src>and they're never shy over a debate. </src><tgt><|wait|></tgt>
+23. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+24. <src><|wait|></src><tgt>議論を避けることはありません。</tgt>  -  <src>ENTP stands for </src><tgt>そして議論が始まっても決して臆しません。ENTPとは、</tgt>
+25. <src>ENTP stands for </src><tgt><|wait|></tgt>  -  <src>Extraverted, Intuitive, \, </src><tgt><|wait|></tgt>
 
 ---
 
-## Test Example 2 / 6
+## Test Example 9 / 60
 
-  - UID: EN_nIpxsCym-BM_W000211
-  - SYSTEM_PROMPT: Translate to Korean, tolerance window size is 3
-
-1. <src>By default, </src><tgt><|wait|></tgt>  -  <src>By default, </src><tgt><|wait|></tgt>
-2. <src>if you create </src><tgt><|wait|></tgt>  -  <src>if you create </src><tgt><|wait|></tgt>
-3. <src>a file </src><tgt><|wait|></tgt>  -  <src>a file </src><tgt><|wait|></tgt>
-4. <src>called source/index, </src><tgt>기본적으로 source/index라는 파일을 만들면,</tgt>  -  <src>called source/index, </src><tgt>기본적으로 source/index 파일을 만드시면 </tgt>
-5. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-6. <src>it's then going to push </src><tgt><|wait|></tgt>  -  <src>it's then going to push </src><tgt><|wait|></tgt>
-7. <src>whatever you put in </src><tgt><|wait|></tgt>  -  <src>whatever you put in </src><tgt><|wait|></tgt>
-8. <src>that file, </src><tgt>그 안에 담긴 내용이나</tgt>  -  <src>that file, </src><tgt>해당 파일에</tgt>
-9. <src>any imports you use, </src><tgt><|wait|></tgt>  -  <src>any imports you use, </src><tgt><|wait|></tgt>
-10. <src>things like that, </src><tgt><|wait|></tgt>  -  <src>things like that, </src><tgt><|wait|></tgt>
-11. <src>out to. </src><tgt><|wait|></tgt>  -  <src>out to. </src><tgt><|wait|></tgt>
-
----
-
-## Test Example 3 / 6
-
-  - UID: ZH_UJBZXO0vtl8_W000127
-  - SYSTEM_PROMPT: Translate to Korean, tolerance window size is 5
-
-1. <src>同样也是</src><tgt><|wait|></tgt>  -  <src>同样也是</src><tgt><|wait|></tgt>
-2. <src>针对要留意</src><tgt><|wait|></tgt>  -  <src>针对要留意</src><tgt><|wait|></tgt>
-3. <src>金钱的部分，</src><tgt><|wait|></tgt>  -  <src>金钱的部分，</src><tgt><|wait|></tgt>
-4. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt>양안 모두 돈과 관련해서 유의하셔야 할 점은, </tgt>
-5. <src>我们从这里呢可以</src><tgt><|wait|></tgt>  -  <src>我们从这里呢可以</src><tgt><|wait|></tgt>
-6. <src>看到的是</src><tgt>마찬가지로 금전적인 부분에서 주의할 점인데,</tgt>  -  <src>看到的是</src><tgt>양쪽 모두에게 공통점이 있는데요,</tgt>
-7. <src>这一副卡片，</src><tgt><|wait|></tgt>  -  <src>这一副卡片，</src><tgt><|wait|></tgt>
-8. <src>它代表的是</src><tgt><|wait|></tgt>  -  <src>它代表的是</src><tgt><|wait|></tgt>
-9. <src>手。</src><tgt><|wait|></tgt>  -  <src>手。</src><tgt><|wait|></tgt>
-10. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-11. <src>那么手的时候呢，</src><tgt><|wait|></tgt>  -  <src>那么手的时候呢，</src><tgt><|wait|></tgt>
-12. <src>通常它</src><tgt>이 카드는 손을 의미합니다. 손은</tgt>  -  <src>通常它</src><tgt><|wait|></tgt>
-13. <src>非常的</src><tgt><|wait|></tgt>  -  <src>非常的</src><tgt><|wait|></tgt>
-14. <src>直白，代表是</src><tgt><|wait|></tgt>  -  <src>直白，代表是</src><tgt><|wait|></tgt>
-15. <src>我们的金钱</src><tgt><|wait|></tgt>  -  <src>我们的金钱</src><tgt><|wait|></tgt>
-16. <src>呢，可能就</src><tgt><|wait|></tgt>  -  <src>呢，可能就</src><tgt><|wait|></tgt>
-17. <src>尽量呢</src><tgt><|wait|></tgt>  -  <src>尽量呢</src><tgt><|wait|></tgt>
-18. <src>不要，</src><tgt>아주 직설적인 카드라 돈과 관련해</tgt>  -  <src>不要，</src><tgt><|wait|></tgt>
-19. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-20. <src>就是做太多的</src><tgt><|wait|></tgt>  -  <src>就是做太多的</src><tgt><|wait|></tgt>
-21. <src>规划，</src><tgt><|wait|></tgt>  -  <src>规划，</src><tgt><|wait|></tgt>
-22. <src>尤其是</src><tgt><|wait|></tgt>  -  <src>尤其是</src><tgt><|wait|></tgt>
-23. <src>针对家中</src><tgt><|wait|></tgt>  -  <src>针对家中</src><tgt><|wait|></tgt>
-24. <src>的男性</src><tgt>너무 많은 계획을 세우지 않는 게 좋다는 뜻인데요,</tgt>  -  <src>的男性</src><tgt>지나,</tgt>
-25. <src>长男。</src><tgt><|wait|></tgt>  -  <src>长</i>性紧张。</src><tgt><|wait|></tgt>
-
----
-
-## Test Example 4 / 6
-
-  - UID: ZH_B00021_S00398_W000012
-  - SYSTEM_PROMPT: Translate to English, tolerance window size is 4
-
-1. <src>三月二十二号，</src><tgt><|wait|></tgt>  -  <src>三月二十二号，</src><tgt><|wait|></tgt>
-2. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-3. <src>美国证券交易委员会宣布对</src><tgt><|wait|></tgt>  -  <src>美国证券交易委员会宣布对</src><tgt><|wait|></tgt>
-4. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-5. <src>加密资产企业家孙宇晨</src><tgt>On March 22nd, the U.S. Securities and Exchange Commission</tgt>  -  <src>加密资产企业家孙羽晨</src><tgt>On March 22nd, the U.S. Securities and Exchange Commission announced that crypto entrepreneur</tgt>
-6. <src>及其三家</src><tgt><|wait|></tgt>  -  <src>及其三家</src><tgt><|wait|></tgt>
-7. <src>全资公司</src><tgt><|wait|></tgt>  -  <src>知名</i>知名</i>数字公司，</src><tgt><|wait|></tgt>
-8. <src>提起诉讼，</src><tgt><|wait|></tgt>  -  <src>提起诉讼，</src><tgt><|wait|></tgt>
-9. <src>指控他们没有经过注册</src><tgt><|wait|></tgt>  -  <src>指控他们没有经过注册</src><tgt>filed a lawsuit against crypto entrepreneur</tgt>
-10. <src>提供和出售</src><tgt>announced a lawsuit against crypto entrepreneur Justin Sun and three of his companies, alleging that they offered and sold</tgt>  -  <src>提供和出售加密</src><tgt><|wait|></tgt>
-11. <src>加密资产</src><tgt><|wait|></tgt>  -  <src>加密资产</src><tgt><|wait|></tgt>
-12. <src>证券Tronics</src><tgt><|wait|></tgt>  -  <src>证券Tronics</src><tgt><|wait|></tgt>
-13. <src>和BitTorrent。</src><tgt><|wait|></tgt>  -  <src>和BitTorrent。</src><tgt><|wait|></tgt>
-
----
-
-## Test Example 5 / 6
-
-  - UID: ZH_NWf8Wc2GVvM_W000007
-  - SYSTEM_PROMPT: Translate to Japanese, tolerance window size is 1
+  - UID: EN_nSOXneMb4Ec_W000365
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Keep at least 3 wait windows before each target release.
 
 1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-2. <src>启示录和</src><tgt>『ヨハネの黙示録』と</tgt>  -  <src>启示录和</src><tgt>ヨハネの黙示録と</tgt>
-3. <src>翡翠石板</src><tgt><|wait|></tgt>  -  <src>肥衰时班</src><tgt><|wait|></tgt>
-4. <src>都曾经预测到，</src><tgt>『エメラルド・タブレット』のどちらもが予言していたことがあります。</tgt>  -  <src>都曾经预测到，</src><tgt>水晶の石板があるからといって、予言していたのは</tgt>
-5. <src>这十四万四千名</src><tgt><|wait|></tgt>  -  <src>这十四万四千名</src><tgt><|wait|></tgt>
-6. <src>光之工作者</src><tgt>それは、14万4000人のライトワーカーが</tgt>  -  <src>光十字工作者退出了</src><tgt>14万4000人の光の十字架たちが退職したと。</tgt>
-7. <src>的到来，会</src><tgt><|wait|></tgt>  -  <src>的到来，会</src><tgt><|wait|></tgt>
-8. <src>在卡利年代</src><tgt>到来し、カリ・ユガの</tgt>  -  <src>在卡利年代</src><tgt>到来すると</tgt>
-9. <src>结束时，</src><tgt><|wait|></tgt>  -  <src>结束时，</src><tgt><|wait|></tgt>
-10. <src>将地球</src><tgt>終わりに地球を</tgt>  -  <src>将地球</src><tgt>終焉を迎える</tgt>
-11. <src>从黑暗势力的手中</src><tgt><|wait|></tgt>  -  <src>从黑暗势力的手中</src><tgt>滅ぼそうと</tgt>
-12. <src>拯救出来。</src><tgt>闇の勢力から救い出すということです。</tgt>  -  <src>拯救出来。</src><tgt>闇の勢力から救い出すと。</tgt>
+2. <src>Meaningful individual </src><tgt><|wait|></tgt>  -  <src>Meaningful, </src><tgt><|wait|></tgt>
+3. <src>right, </src><tgt><|wait|></tgt>  -  <src>individual write, </src><tgt><|wait|></tgt>
+4. <src>and the Supreme Court </src><tgt>有意义的个人权利，而最高法院</tgt>  -  <src>and the Supreme Court </src><tgt>有意义的个人著作，最高法院</tgt>
+5. <src>came along </src><tgt><|wait|></tgt>  -  <src>came along </src><tgt><|wait|></tgt>
+6. <src>last, not leading. </src><tgt><|wait|></tgt>  -  <src>last, not leading. </src><tgt><|wait|></tgt>
+7. <src>And I don't think the courts want to be </src><tgt><|wait|></tgt>  -  <src>And I don't think the courts want to be </src><tgt><|wait|></tgt>
+8. <src><|wait|></src><tgt>是最后才介入的，不是引领者。我不认为</tgt>  -  <src><|wait|></src><tgt>最后才跟进。我认为法院不想</tgt>
+9. <src>the the vanguard of social </src><tgt><|wait|></tgt>  -  <src>the the vanguard of social </src><tgt><|wait|></tgt>
+10. <src>change </src><tgt><|wait|></tgt>  -  <src>change </src><tgt><|wait|></tgt>
+11. <src>these days, </src><tgt><|wait|></tgt>  -  <src>these days. </src><tgt><|wait|></tgt>
+12. <src><|wait|></src><tgt>法院现在想成为社会变革的先锋，</tgt>  -  <src>But they rather </src><tgt>成为社会变革的前沿阵线。</tgt>
+13. <src>but they rather reflect </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+14. <src>the consensus </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+15. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>reflect the consensus </src><tgt><|wait|></tgt>
+16. <src>that's already emerged. </src><tgt>它们更倾向于反映已经形成的共识。</tgt>  -  <src>that's already emerged. </src><tgt>但它们更多是反映已经形成的共识。</tgt>
+17. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>So, </src><tgt><|wait|></tgt>
+18. <src>So you have some </src><tgt><|wait|></tgt>  -  <src>you have </src><tgt><|wait|></tgt>
+19. <src>federal judges </src><tgt><|wait|></tgt>  -  <src>some federal judges </src><tgt><|wait|></tgt>
+20. <src><|wait|></src><tgt>所以，有些联邦法官……</tgt>  -  <src>who </src><tgt>所以，你们有了一些联邦法官，</tgt>
+21. <src>who. </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
 
 ---
 
-## Test Example 6 / 6
+## Test Example 32 / 60
 
-  - UID: ZH_Y4xRc2amPxY_W000024
-  - SYSTEM_PROMPT: Translate to Korean, tolerance window size is 4
+  - UID: ZH_B00041_S00155_W000028
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English.
 
-1. <src>就会</src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-2. <src>消耗我们</src><tgt><|wait|></tgt>  -  <src>消耗我们</src><tgt><|wait|></tgt>
+1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>家长需要</src><tgt>Parents need to</tgt>
+2. <src>家长需要做的是，</src><tgt>What parents need to do is this:</tgt>  -  <src>做的是</src><tgt><|wait|></tgt>
 3. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-4. <src>身体骨骼当中的</src><tgt><|wait|></tgt>  -  <src>身体骨骼当中的</src><tgt>우리 몸에서,</tgt>
-5. <src>矿物质，更多的</src><tgt>우리 몸은 뼈 속의 미네랄을 소모하게 되고, 더 많은</tgt>  -  <src>矿物质，更多的</src><tgt>우리 몸에 있던 칼슘을</tgt>
-6. <src>靠物矿物质。</src><tgt><|wait|></tgt>  -  <src>靠物</src><tgt><|wait|></tgt>
+4. <src>用我们深深的</src><tgt><|wait|></tgt>  -  <src>用我们深深的</src><tgt><|wait|></tgt>
+5. <src>爱浇水、</src><tgt><|wait|></tgt>  -  <src>爱浇水、</src><tgt>show their love for the child, like watering a plant,</tgt>
+6. <src>施肥，</src><tgt>water and fertilize with our deep love,</tgt>  -  <src>施肥，</src><tgt>fertilizing it,</tgt>
+7. <src>给足</src><tgt><|wait|></tgt>  -  <src>给足</src><tgt><|wait|></tgt>
+8. <src>孩子心理营养，</src><tgt>give children enough psychological nourishment,</tgt>  -  <src>孩子心理营养，</src><tgt>and giving them enough emotional nourishment.</tgt>
+9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>并耐心</src><tgt><|wait|></tgt>
+10. <src>并耐心等待孩子</src><tgt>and wait patiently for</tgt>  -  <src>等他</src><tgt><|wait|></tgt>
+11. <src>慢慢长大。</src><tgt>them to grow slowly.</tgt>  -  <src>慢慢长大。</src><tgt>And patiently waiting as they grow up.</tgt>
+
+---
+
+## Test Example 40 / 60
+
+  - UID: JA_Xv3zO_K9SuU_W000011
+  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
+
+1. <src>そうです。</src>  -  <src>そうです。</src>
+2. <src>そこで</src>  -  <src>そこで</src>
+3. <src><|wait|></src>  -  <src><|wait|></src>
+4. <src>テキという設備寺が</src>  -  <src>テキという設備寺が</src>
+5. <src>ありましたね。</src>  -  <src>ありましたね。</src>
+6. <src>で、</src>  -  <src>で、</src>
+7. <src><|wait|></src>  -  <src><|wait|></src>
+8. <src>長井慶義氏の仕組み</src>  -  <src>長井慶義氏の仕組み</src>
+9. <src><|wait|></src>  -  <src><|wait|></src>
+10. <src>は五経、</src>  -  <src>は五個</src>
+11. <src><|wait|></src>  -  <src><|wait|></src>
+12. <src>設備寺、五比</src>  -  <src>設備寺五個</src>
+13. <src>です。</src>  -  <src>です。</src>
+
+---
+
+## Test Example 48 / 60
+
+  - UID: EN_n_COVPwr54I_W000006
+  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Korean. Keep at least 1 wait windows before each target release.
+
+1. <src>My name is </src><tgt><|wait|></tgt>  -  <src>My name is </src><tgt><|wait|></tgt>
+2. <src>Kerenath Dettig. </src><tgt>제 이름은 케레나스 데티그입니다.</tgt>  -  <src>Kerenath Dettig. </src><tgt>제 이름은 케레나스 데티그( Kerenath Dettig) 입니다.</tgt>
+3. <src>I am currently </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+4. <src><|wait|></src><tgt>저는 현재</tgt>  -  <src>I am currently studying </src><tgt>현재</tgt>
+5. <src>studying a Bachelor of Finance </src><tgt><|wait|></tgt>  -  <src>a Bachelor of Finance </src><tgt><|wait|></tgt>
+6. <src>and a Bachelor of Psychology </src><tgt><|wait|></tgt>  -  <src>and a Bachelor of Psychology </src><tgt>경영학 학사 학위와</tgt>
 7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-8. <src>所以呢，</src><tgt><|wait|></tgt>  -  <src>所以呢，</src><tgt>부 உலோக 성분이 필요하죠. 그래서 말 그대로</tgt>
-9. <src>这个肥胖人</src><tgt><|wait|></tgt>  -  <src>这个肥胖人</src><tgt>부동사람이나</tgt>
-10. <src>往往都会有</src><tgt>미네랄을 필요로 하게 됩니다. 그래서 비만인 분들은</tgt>  -  <src>往往都会有</src><tgt>종양이 환자들에게서 흔히 발견되는데요,</tgt>
+8. <src>here at the ANU, </src><tgt>호주국립대학교( ANU) 에서 금융학과 심리학 학사 과정을</tgt>  -  <src>here at the ANU, </src><tgt>심리학 학사 학위를 안데번 대학교( ANU ) 에서</tgt>
+9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
+10. <src>and in the future, I want to go into </src><tgt>밟고 있고요, 앞으로는</tgt>  -  <src>and in the future, I want to go into </src><tgt>수강 중이고요, 나중에는</tgt>
 11. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-12. <src>这种关节</src><tgt><|wait|></tgt>  -  <src>这种关节和</src><tgt><|wait|></tgt>
-13. <src>和软组织</src><tgt><|wait|></tgt>  -  <src>和软组织</src><tgt><|wait|></tgt>
-14. <src>的问题，就是</src><tgt><|wait|></tgt>  -  <src>的就是</src><tgt><|wait|></tgt>
-15. <src>因为什么？</src><tgt>관절이나 연조직 문제를 자주 겪는데요. 왜 그럴까요?</tgt>  -  <src>因为什么？</src><tgt>관절이나 연부 조직 질환을 흔히 앓 곤두 돌기 때문인데요.</tgt>
-16. <src>就是消耗了</src><tgt><|wait|></tgt>  -  <src>就是消耗了</src><tgt><|wait|></tgt>
-17. <src>太多的矿物质。</src><tgt><|wait|></tgt>  -  <src>体内的矿物质。</src><tgt><|wait|></tgt>
+12. <src>corporate consultancy. </src><tgt>기업 컨설팅 쪽으로 가고 싶습니다.</tgt>  -  <src>corporate consultancy. </src><tgt>기업 컨설팅 분야로 진출하고 싶습니다.</tgt>
+
+---
+
+## Test Example 54 / 60
+
+  - UID: ZH_W0NbyT5Ak-A_W000071
+  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
+
+1. <src>弗洛伊德</src>  -  <src>弗洛伊德</src>
+2. <src>首次觉知到</src>  -  <src>首次觉知到</src>
+3. <src>那个现象：</src>  -  <src>那个现象。</src>
+4. <src>每当我们</src>  -  <src>美登们</src>
+5. <src><|wait|></src>  -  <src><|wait|></src>
+6. <src>处于爱之中，</src>  -  <src>处于爱之中，</src>
+7. <src>所谓的爱，</src>  -  <src>所谓的爱，</src>
+8. <src>我们也</src>  -  <src><|wait|></src>
+9. <src>同时进入恨。</src>  -  <src>我们也同时进入黑暗，</src>
+10. <src><|wait|></src>  -  <src><|wait|></src>
+11. <src>在早上的时候，</src>  -  <src>在早上的时候，</src>
+12. <src>它是爱；</src>  -  <src>他是爱。</src>
+13. <src>到了晚上，</src>  -  <src>到了晚上，</src>
+14. <src>它就变成恨。</src>  -  <src>他就变成</src>
+15. <src><|wait|></src>  -  <src>黑暗，</src>
+16. <src>那个钟摆</src>  -  <src>那个钟表。</src>
+17. <src><|wait|></src>  -  <src><|wait|></src>
+18. <src>继续在移动。</src>  -  <src>继续在移动。</src>
 ```

@@ -14,6 +14,7 @@ ordinary text.
 
 from __future__ import annotations
 
+import json
 import math as _math
 import math
 import os
@@ -62,6 +63,7 @@ class LoraTrainConfig:
     weight_decay: float = 0.0
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
+    lr_scheduler_type: str = "linear"
     num_train_epochs: int = 1
     per_device_train_batch_size: int = 1
     per_device_eval_batch_size: int = 1
@@ -379,6 +381,110 @@ def _build_train_validate_test_rows(
     return train_rows, validate_rows or None, test_rows
 
 
+def _translation_window_interval(example: TrainingExample) -> int | None:
+    if example.translation_mode == "natural":
+        return None
+    if example.translation_mode == "fixed_window":
+        return int(example.tolerance_window)
+    if example.translation_mode == "conservative":
+        if example.min_wait_window is None:
+            raise ValueError(f"Conservative translation example {example.uid} has no min_wait_window")
+        return int(example.min_wait_window)
+    raise ValueError(
+        f"Unsupported translation mode for distribution summary: {example.translation_mode!r}"
+    )
+
+
+def summarize_translation_task_distribution(
+    examples: list[TrainingExample],
+    *,
+    bin_size: int,
+) -> dict[str, Any]:
+    """Summarize train translation samples by mode and requested/effective window."""
+
+    if int(bin_size) <= 0:
+        raise ValueError(f"bin_size must be positive: {bin_size}")
+    bin_size = int(bin_size)
+    translation_examples = [example for example in examples if example.task == "translation"]
+    translation_total = len(translation_examples)
+    counts: dict[tuple[str, int | None, int | None], int] = {}
+    for example in translation_examples:
+        if example.translation_mode is None:
+            raise ValueError(f"Translation example {example.uid} has no translation_mode")
+        interval = _translation_window_interval(example)
+        if interval is None:
+            key = (example.translation_mode, None, None)
+        else:
+            bin_start = ((interval - 1) // bin_size) * bin_size + 1 if interval > 0 else 0
+            key = (example.translation_mode, bin_start, bin_start + bin_size - 1)
+        counts[key] = counts.get(key, 0) + 1
+
+    mode_order = {"natural": 0, "fixed_window": 1, "conservative": 2}
+    bins = []
+    for (mode, window_start, window_end), count in sorted(
+        counts.items(),
+        key=lambda item: (
+            mode_order.get(item[0][0], 99),
+            -1 if item[0][1] is None else int(item[0][1]),
+            -1 if item[0][2] is None else int(item[0][2]),
+        ),
+    ):
+        bins.append(
+            {
+                "translation_mode": mode,
+                "window_start": window_start,
+                "window_end": window_end,
+                "count": count,
+                "ratio_of_translation_tasks": 0.0 if translation_total == 0 else count / translation_total,
+            }
+        )
+    return {
+        "bin_size": bin_size,
+        "translation_examples": translation_total,
+        "bins": bins,
+    }
+
+
+def _format_translation_task_distribution(summary: dict[str, Any]) -> str:
+    lines = [
+        f"Translation Task Distribution (bin size {summary['bin_size']})",
+        f"  - TRANSLATION_EXAMPLES: {summary['translation_examples']}",
+        "  - Percentages are relative to translation tasks.",
+    ]
+    bins = summary.get("bins", [])
+    if not bins:
+        lines.append("  - none")
+        return "\n".join(lines)
+    for item in bins:
+        window_start = item["window_start"]
+        window_end = item["window_end"]
+        if window_start is None:
+            window_label = "natural"
+        elif window_start == window_end:
+            window_label = str(window_start)
+        else:
+            window_label = f"{window_start}-{window_end}"
+        ratio = float(item["ratio_of_translation_tasks"])
+        lines.append(
+            f"  - {item['translation_mode']} | window={window_label}: "
+            f"{item['count']} ({ratio * 100:.2f}%)"
+        )
+    return "\n".join(lines)
+
+
+def write_translation_task_distribution(
+    output_dir: str | Path,
+    summary: dict[str, Any],
+    *,
+    filename: str = "translation_task_distribution.json",
+) -> Path:
+    output_path = Path(output_dir) / filename
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as file:
+        json.dump(summary, file, ensure_ascii=False, indent=2)
+    return output_path
+
+
 def _format_startup_metadata(
     *,
     data_config: TrainingDataConfig,
@@ -503,6 +609,7 @@ def train_lora(
     _set_seed(train_config.seed)
     if not train_config.assistant_header or not train_config.assistant_end or not train_config.generation_stop:
         raise ValueError("LoraTrainConfig requires assistant_header, assistant_end, and generation_stop")
+    output_dir = Path(train_config.output_dir)
     splits = build_training_dataset(
         data_config.dataset_root,
         total_samples=data_config.total_samples,
@@ -513,6 +620,9 @@ def train_lora(
         seed=data_config.seed,
     )
     train_rows, validate_rows, test_rows = _build_train_validate_test_rows(splits)
+    translation_distribution_bin1 = summarize_translation_task_distribution(splits.train, bin_size=1)
+    translation_distribution_bin4 = summarize_translation_task_distribution(splits.train, bin_size=4)
+    write_translation_task_distribution(output_dir, translation_distribution_bin1)
     for row in train_rows:
         messages = row["messages"]
         _assert_message_order(messages)
@@ -522,7 +632,6 @@ def train_lora(
     from transformers.integrations import TensorBoardCallback
     from transformers.trainer_callback import PrinterCallback, ProgressCallback
 
-    output_dir = Path(train_config.output_dir)
     continue_plan = train_config.continue_plan or ContinuePlan(
         continue_type=train_config.continue_type,
         source_checkpoint=None,
@@ -558,6 +667,7 @@ def train_lora(
         weight_decay=train_config.weight_decay,
         adam_beta1=train_config.adam_beta1,
         adam_beta2=train_config.adam_beta2,
+        lr_scheduler_type=train_config.lr_scheduler_type,
         num_train_epochs=train_config.num_train_epochs,
         warmup_steps=train_config.warmup_steps,
         logging_steps=train_config.logging_steps,
@@ -653,6 +763,8 @@ def train_lora(
             tensorboard_enabled=train_config.launch_tensorboard and train_config.report_to == "tensorboard",
         )
     )
+    print()
+    print(_format_translation_task_distribution(translation_distribution_bin4))
     print()
 
     tensorboard = TensorBoardServer(

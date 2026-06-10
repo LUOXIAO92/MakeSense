@@ -320,19 +320,19 @@ def _translation_task_labels(config: TranslationTaskConfig, count: int) -> list[
 def _window_bounds_for_record(
     *,
     config: dict[str, float | int | None],
-    max_empty_window: int,
+    max_request_window: int,
     mode: TranslationTaskName,
 ) -> tuple[int, int]:
-    if max_empty_window < 0:
-        raise ValueError(f"max_empty_window must be non-negative: {max_empty_window}")
+    if max_request_window < 0:
+        raise ValueError(f"max_request_window must be non-negative: {max_request_window}")
     configured_min = config.get("min")
     configured_max = config.get("max")
     lower = 1 if configured_min is None else int(configured_min)
-    upper = max_empty_window if configured_max is None else min(int(configured_max), max_empty_window)
+    upper = max_request_window if configured_max is None else min(int(configured_max), max_request_window)
     if lower > upper:
         raise ValueError(
-            f"No valid {mode} window for record max_empty_window={max_empty_window}: "
-            f"min={configured_min}, max={configured_max}. Use min=0 explicitly to allow zero-window sampling."
+            f"No valid {mode} requested window for record max_request_window={max_request_window}: "
+            f"min={configured_min}, max={configured_max}."
         )
     return lower, upper
 
@@ -341,11 +341,24 @@ def _sample_window_from_config(
     rng: random.Random,
     *,
     config: dict[str, float | int | None],
-    max_empty_window: int,
+    max_request_window: int,
     mode: TranslationTaskName,
 ) -> int:
-    lower, upper = _window_bounds_for_record(config=config, max_empty_window=max_empty_window, mode=mode)
+    lower, upper = _window_bounds_for_record(config=config, max_request_window=max_request_window, mode=mode)
     return rng.randint(lower, upper)
+
+
+def _max_request_window_for_source_record(source_record: _TranslationSourceRecord) -> int:
+    """Return the largest requested wait-window interval this record can carry.
+
+    ``Translation.max_empty_window`` describes the maximum wait already present in
+    natural/evidence-ready translation blocks.  Fixed-window and conservative
+    training modes are allowed to introduce artificial waits, so sampling must be
+    bounded by the number of available source windows instead.
+    """
+
+    asr_blocks = build_asr_blocks(source_record.metadata, source_record.transcription)
+    return max(0, len(asr_blocks) - 1)
 
 
 def _build_translation_source_records(dataset_root: str | Path) -> list[_TranslationSourceRecord]:
@@ -447,9 +460,12 @@ def _build_sampled_training_record(
         requested_window = _sample_window_from_config(
             rng,
             config=translation_task_config[translation_mode],
-            max_empty_window=source_record.translation.max_empty_window,
+            max_request_window=_max_request_window_for_source_record(source_record),
             mode=translation_mode,
         )
+        if requested_window == 0:
+            translation_mode = "natural"
+            requested_window = None
     return _source_record_to_base_training_record(
         source_record,
         translation_mode=translation_mode,

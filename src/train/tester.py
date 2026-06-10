@@ -277,7 +277,11 @@ class StreamingSampleTester:
                     "extracted_protocol_output": protocol["normalized_output"],
                     "protocol_valid": protocol["valid"],
                     "raw_turn_stopped": raw_turn_stopped(raw_output, postprocessed_output, self.generation_stop),
-                    "postprocessed_turn_stopped": postprocessed_turn_stopped(postprocessed_output, protocol),
+                    "postprocessed_turn_stopped": postprocessed_turn_stopped(
+                        postprocessed_output,
+                        protocol,
+                        generation_stop=self.generation_stop,
+                    ),
                 }
             )
             state.next_turn_offset += 1
@@ -444,31 +448,110 @@ class StreamingSampleTester:
             )
 
 
-PROTOCOL_PATTERN = re.compile(r"^<src>(.*?)</src><tgt>(.*?)</tgt>$", re.DOTALL)
+PROTOCOL_TAG_PATTERN = re.compile(r"</?(?:src|tgt)>")
+PROTOCOL_TAGS = ("<src>", "</src>", "<tgt>", "</tgt>")
+DEFAULT_ALLOWED_EOS_REMAINDERS = ("<turn|>", "<eos>", "</s>", "<|end_of_text|>")
 
 
 def parse_protocol_output(text: str) -> dict[str, Any]:
-    match = PROTOCOL_PATTERN.fullmatch(text)
-    if match is None:
+    if not text.startswith("<src>"):
         return {
             "valid": False,
+            "kind": None,
             "src": None,
             "tgt": None,
             "normalized_output": None,
+            "remainder": text,
+            "stopped_at_protocol_boundary": False,
         }
-    src_text = match.group(1)
-    tgt_text = match.group(2)
-    if any(tag in src_text for tag in ("<src>", "</src>", "<tgt>", "</tgt>")):
-        return {"valid": False, "src": None, "tgt": None, "normalized_output": None}
-    if any(tag in tgt_text for tag in ("<src>", "</src>", "<tgt>", "</tgt>")):
-        return {"valid": False, "src": None, "tgt": None, "normalized_output": None}
-    normalized = f"<src>{src_text}</src><tgt>{tgt_text}</tgt>"
+
+    src_start = len("<src>")
+    src_end = text.find("</src>", src_start)
+    if src_end < 0:
+        return _invalid_protocol_result(text)
+    src_text = text[src_start:src_end]
+    if _contains_protocol_tag(src_text):
+        return _invalid_protocol_result(text)
+
+    unit_end = src_end + len("</src>")
+    tgt_text: str | None = None
+    kind = "asr"
+    if text.startswith("<tgt>", unit_end):
+        tgt_start = unit_end + len("<tgt>")
+        tgt_end = text.find("</tgt>", tgt_start)
+        if tgt_end < 0:
+            return _invalid_protocol_result(text)
+        tgt_text = text[tgt_start:tgt_end]
+        if _contains_protocol_tag(tgt_text):
+            return _invalid_protocol_result(text)
+        unit_end = tgt_end + len("</tgt>")
+        kind = "translation"
+
+    remainder = text[unit_end:]
+    if not _protocol_tags_are_balanced(remainder):
+        return _invalid_protocol_result(text, remainder=remainder)
+
+    normalized = f"<src>{src_text}</src>"
+    if tgt_text is not None:
+        normalized = f"{normalized}<tgt>{tgt_text}</tgt>"
     return {
         "valid": True,
+        "kind": kind,
         "src": src_text,
         "tgt": tgt_text,
         "normalized_output": normalized,
+        "remainder": remainder,
+        "stopped_at_protocol_boundary": _is_allowed_eos_remainder(remainder),
     }
+
+
+def _invalid_protocol_result(text: str, *, remainder: str | None = None) -> dict[str, Any]:
+    return {
+        "valid": False,
+        "kind": None,
+        "src": None,
+        "tgt": None,
+        "normalized_output": None,
+        "remainder": text if remainder is None else remainder,
+        "stopped_at_protocol_boundary": False,
+    }
+
+
+def _contains_protocol_tag(text: str) -> bool:
+    return any(tag in text for tag in PROTOCOL_TAGS)
+
+
+def _protocol_tags_are_balanced(text: str) -> bool:
+    stack: list[str] = []
+    for match in PROTOCOL_TAG_PATTERN.finditer(text):
+        tag = match.group(0)
+        if tag == "<src>":
+            if stack:
+                return False
+            stack.append("src")
+        elif tag == "<tgt>":
+            if stack:
+                return False
+            stack.append("tgt")
+        elif tag == "</src>":
+            if stack != ["src"]:
+                return False
+            stack.pop()
+        elif tag == "</tgt>":
+            if stack != ["tgt"]:
+                return False
+            stack.pop()
+    return not stack
+
+
+def _is_allowed_eos_remainder(text: str, *, generation_stop: str | None = None) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    allowed = set(DEFAULT_ALLOWED_EOS_REMAINDERS)
+    if generation_stop:
+        allowed.add(generation_stop)
+    return stripped in allowed
 
 
 def _is_wait_content(text: str | None) -> bool | None:
@@ -482,8 +565,15 @@ def raw_turn_stopped(raw_output: str, postprocessed_output: str, generation_stop
     return remainder.startswith(generation_stop)
 
 
-def postprocessed_turn_stopped(postprocessed_output: str, protocol: dict[str, Any]) -> bool:
-    return bool(protocol["valid"] and postprocessed_output == protocol["normalized_output"])
+def postprocessed_turn_stopped(
+    postprocessed_output: str,
+    protocol: dict[str, Any],
+    *,
+    generation_stop: str | None = None,
+) -> bool:
+    if not bool(protocol["valid"]):
+        return False
+    return _is_allowed_eos_remainder(str(protocol.get("remainder") or ""), generation_stop=generation_stop)
 
 
 def summarize_test_records(records: list[dict[str, Any]]) -> dict[str, Any]:

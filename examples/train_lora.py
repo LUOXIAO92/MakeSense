@@ -39,17 +39,16 @@ SPLIT_RATIO: tuple[float, float, float] = (0.8975, 0.1, 0.0025)
 
 # Translation-subtask sampling group: used only after a sample is assigned to the
 # translation task. The three ratio values are normalized together. For
-# fixed_window/conservative, min=None means 1; set min=0 explicitly if zero-window
-# sampling should be allowed. max=None means the record's max available window.
+# fixed_window/conservative, min=None means 1.
 TRANSLATION_TASK_CONFIG = {
     "natural":      {"ratio": 2},
-    "fixed_window": {"ratio": 4, "min": 0, "max": None},
-    "conservative": {"ratio": 4, "min": 0, "max": None},
+    "fixed_window": {"ratio": 4, "min": None, "max": None},
+    "conservative": {"ratio": 4, "min": None, "max": None},
 }
 
 
 # --- Output / checkpoint controls ---
-OUTPUT_DIR = Path("outputs") / "makesense_lora"
+OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it"
 CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
@@ -76,10 +75,11 @@ LORA_TARGET_MODULES = (
 
 
 # --- Trainer controls ---
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 3e-4
 WEIGHT_DECAY = 0.0
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
+LR_SCHEDULER_TYPE = "cosine"  # "linear" | "cosine" | "constant" | "constant_with_warmup"
 MAX_GRAD_NORM = 1.0
 NUM_TRAIN_EPOCHS = 5
 MAX_STEPS = -1
@@ -89,12 +89,12 @@ GRADIENT_ACCUMULATION_STEPS = 16
 WARMUP_STEPS = int(0.01 * 24000 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
 LOGGING_STEPS = 1
 EVAL_ACCUMULATION_STEPS = 1
-EVAL_STEPS = 10
-SAVE_STEPS = 100
-TEST_STEPS = 10
+EVAL_STEPS = 300
+SAVE_STEPS = 300
+TEST_STEPS = 300
 TEST_MAX_NEW_TOKENS = 512
 TEST_RECORD_COUNT = -1
-TEST_BATCH_SIZE = 60
+TEST_BATCH_SIZE = 30
 TEST_OUTPUT_MARKDOWN = True
 CUDA_EMPTY_CACHE_STEPS: int | None = 1
 
@@ -169,6 +169,7 @@ def main() -> None:
         weight_decay=WEIGHT_DECAY,
         adam_beta1=ADAM_BETA1,
         adam_beta2=ADAM_BETA2,
+        lr_scheduler_type=LR_SCHEDULER_TYPE,
         num_train_epochs=NUM_TRAIN_EPOCHS,
         max_steps=MAX_STEPS,
         per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
