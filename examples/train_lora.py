@@ -29,6 +29,7 @@ import os
 DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
 # DATASET_ROOT = Path("dataset_test")
 TOTAL_SAMPLES: int | None = None
+MAX_WINDOW_SIZE = -1
 SEED = 4021
 
 # Dataset sampling group: repeat the source record pool, then shuffle and assign
@@ -49,14 +50,13 @@ TRANSLATION_TASK_CONFIG = {
 
 # --- Output / checkpoint controls ---
 OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it-2"
-CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
+CONTINUE_TYPE = "resume"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
 
 
 # --- Model / LoRA controls ---
 MODEL_NAME = "google/gemma-4-E2B-it"
-MAX_SEQ_LENGTH = 16000
 LOAD_IN_4BIT = True
 AUDIO_SAMPLING_RATE = 16000
 AUDIO_CHUNK_SECONDS = 1.0
@@ -92,9 +92,9 @@ EVAL_ACCUMULATION_STEPS = 1
 EVAL_STEPS = 300
 SAVE_STEPS = 300
 TEST_STEPS = 300
-TEST_MAX_NEW_TOKENS = 512
+TEST_MAX_NEW_TOKENS = 128
 TEST_RECORD_COUNT = -1
-TEST_BATCH_SIZE = 30
+TEST_BATCH_SIZE = 10
 TEST_OUTPUT_MARKDOWN = True
 CUDA_EMPTY_CACHE_STEPS: int | None = 1
 TEST_CUDA_EMPTY_CACHE_STEPS: int | None = None
@@ -126,7 +126,7 @@ def load_base_model():
         device_map="auto",
         quantization_config=quantization_config,
         trust_remote_code=True,
-        attn_implementation="flash_attention_2"
+        attn_implementation="sdpa"
     )
     if LOAD_IN_4BIT:
         base_model = prepare_multimodal_model_for_kbit_lora_training(base_model)
@@ -151,6 +151,7 @@ def main() -> None:
     data_config = TrainingDataConfig(
         dataset_root=DATASET_ROOT,
         total_samples=TOTAL_SAMPLES,
+        max_window_size=MAX_WINDOW_SIZE,
         task_ratio=TASK_RATIO,
         split_ratio=SPLIT_RATIO,
         translation_task_config=TRANSLATION_TASK_CONFIG,
@@ -164,7 +165,6 @@ def main() -> None:
     )
     train_config = LoraTrainConfig(
         output_dir=OUTPUT_DIR,
-        max_seq_length=MAX_SEQ_LENGTH,
         audio_sampling_rate=AUDIO_SAMPLING_RATE,
         audio_chunk_seconds=AUDIO_CHUNK_SECONDS,
         learning_rate=LEARNING_RATE,

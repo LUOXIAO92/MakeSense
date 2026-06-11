@@ -473,7 +473,21 @@ def _build_sampled_training_record(
     )
 
 
-def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: TaskName) -> TrainingExample:
+def _base_record_to_training_example(
+    base_record: _BaseTrainingRecord,
+    task: TaskName,
+    *,
+    max_window_size: int,
+) -> TrainingExample:
+    def limit_windows(outputs: list[str]) -> list[str]:
+        if max_window_size == -1:
+            return list(outputs)
+        if max_window_size == 0:
+            raise ValueError("max_window_size must not be 0; use -1 for all windows or a positive limit")
+        if max_window_size < -1:
+            raise ValueError(f"max_window_size must be -1 or positive: {max_window_size}")
+        return list(outputs[:max_window_size])
+
     if task == "asr":
         return TrainingExample(
             task="asr",
@@ -484,9 +498,11 @@ def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: Tas
             min_wait_window=None,
             tolerance_window=base_record.tolerance_window,
             audio_path=base_record.audio_path,
-            src_outputs=base_record.asr_blocks,
+            src_outputs=limit_windows(base_record.asr_blocks),
             tgt_outputs=None,
         )
+    src_outputs = limit_windows(base_record.asr_blocks)
+    tgt_outputs = limit_windows(base_record.translation_blocks)
     return TrainingExample(
         task="translation",
         uid=base_record.uid,
@@ -496,8 +512,8 @@ def _base_record_to_training_example(base_record: _BaseTrainingRecord, task: Tas
         min_wait_window=base_record.min_wait_window,
         tolerance_window=base_record.tolerance_window,
         audio_path=base_record.audio_path,
-        src_outputs=base_record.asr_blocks,
-        tgt_outputs=base_record.translation_blocks,
+        src_outputs=src_outputs,
+        tgt_outputs=tgt_outputs,
     )
 
 
@@ -507,6 +523,7 @@ def _build_training_examples_from_source_records(
     *,
     task_ratio: tuple[float, float],
     translation_task_config: TranslationTaskConfig,
+    max_window_size: int,
 ) -> list[TrainingExample]:
     """Assign task/subtask labels and convert selected source rows to examples."""
 
@@ -529,7 +546,7 @@ def _build_training_examples_from_source_records(
                 translation_mode="natural",
                 requested_window=None,
             )
-            examples.append(_base_record_to_training_example(base_record, "asr"))
+            examples.append(_base_record_to_training_example(base_record, "asr", max_window_size=max_window_size))
             continue
         translation_subtask = translation_labels[translation_label_idx]
         translation_label_idx += 1
@@ -539,7 +556,7 @@ def _build_training_examples_from_source_records(
             translation_mode=translation_subtask,
             translation_task_config=translation_task_config,
         )
-        examples.append(_base_record_to_training_example(base_record, "translation"))
+        examples.append(_base_record_to_training_example(base_record, "translation", max_window_size=max_window_size))
 
     rng.shuffle(examples)
     return examples
@@ -549,6 +566,7 @@ def build_training_dataset(
     dataset_root: str | Path,
     *,
     total_samples: int | None = None,
+    max_window_size: int = -1,
     task_ratio: tuple[float, float] = (9, 1),
     split_ratio: tuple[float, float, float] = (8, 1.5, 0.5),
     translation_task_config: TranslationTaskConfig,
@@ -556,6 +574,10 @@ def build_training_dataset(
     seed: int = 4021,
 ) -> TrainingDatasetSplits:
     """Build fixed-size train/validate/test splits from translation base records.
+
+    ``max_window_size`` controls how many streaming windows are kept per training
+    example.  ``-1`` keeps all windows, ``0`` is invalid, and positive values keep
+    the first N windows.  Processor-level truncation must not be used for this.
 
     ``task_ratio`` is ``(translation, asr)`` and is one configuration group.
     ``translation_task_config`` is a separate group used only after a selected
@@ -579,6 +601,10 @@ def build_training_dataset(
         raise ValueError(f"split_ratio must be (train, validate, test), got: {split_ratio}")
     if dataset_repeat < 1:
         raise ValueError(f"dataset_repeat must be >= 1: {dataset_repeat}")
+    if max_window_size == 0:
+        raise ValueError("max_window_size must not be 0; use -1 for all windows or a positive limit")
+    if max_window_size < -1:
+        raise ValueError(f"max_window_size must be -1 or positive: {max_window_size}")
 
     rng = random.Random(seed)
     _validate_translation_task_config(translation_task_config)
@@ -602,17 +628,20 @@ def build_training_dataset(
             train_source_records,
             task_ratio=task_ratio,
             translation_task_config=translation_task_config,
+            max_window_size=max_window_size,
         ),
         validate=_build_training_examples_from_source_records(
             rng,
             validate_source_records,
             task_ratio=task_ratio,
             translation_task_config=translation_task_config,
+            max_window_size=max_window_size,
         ),
         test=_build_training_examples_from_source_records(
             rng,
             test_source_records,
             task_ratio=task_ratio,
             translation_task_config=translation_task_config,
+            max_window_size=max_window_size,
         ),
     )

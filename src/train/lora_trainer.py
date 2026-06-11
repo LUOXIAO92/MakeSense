@@ -40,6 +40,7 @@ class TrainingDataConfig:
 
     dataset_root: str | Path = "dataset_test"
     total_samples: int | None = None
+    max_window_size: int = -1
     task_ratio: tuple[float, float] = (9, 1)
     split_ratio: tuple[float, float, float] = (8, 1.5, 0.5)
     translation_task_config: TranslationTaskConfig = field(default_factory=lambda: {
@@ -56,7 +57,6 @@ class LoraTrainConfig:
     """Transformers Trainer controls for an externally prepared PEFT model."""
 
     output_dir: str | Path = "outputs/makesense_lora"
-    max_seq_length: int = 8192
     audio_sampling_rate: int = 16000
     audio_chunk_seconds: float = 1.0
     learning_rate: float = 2e-4
@@ -304,7 +304,6 @@ class MakeSenseAudioCollator:
         self,
         processor: Any,
         *,
-        max_length: int,
         audio_sampling_rate: int,
         audio_chunk_seconds: float,
         assistant_header: str,
@@ -314,7 +313,6 @@ class MakeSenseAudioCollator:
         if not assistant_header or not assistant_end or not generation_stop:
             raise ValueError("Assistant frame spec values must be provided by the orchestration layer")
         self.processor = processor
-        self.max_length = max_length
         self.audio_sampling_rate = audio_sampling_rate
         self.audio_chunk_seconds = audio_chunk_seconds
         self.assistant_mask_spec = AssistantMaskSpec(
@@ -341,8 +339,6 @@ class MakeSenseAudioCollator:
                 audio=[chunk.detach().cpu().to(dtype=torch.float32).numpy() for chunk in flat_audio_chunks],
                 return_tensors="pt",
                 padding=True,
-                truncation=True,
-                max_length=self.max_length,
             )
         except AttributeError as exc:
             raise ValueError("Real-audio training requires callable processor(text=..., audio=...)") from exc
@@ -533,6 +529,7 @@ def _format_startup_metadata(
         f"  - TRAIN_EXAMPLES: {train_examples}",
         f"  - VALIDATE_EXAMPLES: {validate_examples}",
         f"  - TEST_EXAMPLES: {test_examples}",
+        f"  - MAX_WINDOW_SIZE: {data_config.max_window_size}",
         "",
         "Audio",
         f"  - AUDIO_SAMPLING_RATE: {train_config.audio_sampling_rate}",
@@ -600,6 +597,7 @@ def _test_metadata(
         "checkpoint_path": None if train_config.checkpoint_path is None else str(train_config.checkpoint_path),
         "resolved_checkpoint_path": None if continue_plan.resolved_checkpoint is None else str(continue_plan.resolved_checkpoint),
         "model_name": train_config.model_name,
+        "max_window_size": data_config.max_window_size,
         "train_examples": train_examples,
         "validate_examples": validate_examples,
         "test_examples": test_examples,
@@ -623,6 +621,7 @@ def train_lora(
     splits = build_training_dataset(
         data_config.dataset_root,
         total_samples=data_config.total_samples,
+        max_window_size=data_config.max_window_size,
         task_ratio=data_config.task_ratio,
         split_ratio=data_config.split_ratio,
         translation_task_config=data_config.translation_task_config,
@@ -660,7 +659,6 @@ def train_lora(
         os.environ["TENSORBOARD_LOGGING_DIR"] = str(logging_dir)
     data_collator = MakeSenseAudioCollator(
         processor,
-        max_length=train_config.max_seq_length,
         audio_sampling_rate=train_config.audio_sampling_rate,
         audio_chunk_seconds=train_config.audio_chunk_seconds,
         assistant_header=train_config.assistant_header,
