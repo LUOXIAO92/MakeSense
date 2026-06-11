@@ -363,7 +363,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
     ) -> None:
         self._update_progress(state)
         step = int(state.global_step)
-        if self._should_defer_step_test_to_evaluate(args=args, step=step):
+        if self._should_defer_step_test_to_later_callback(args=args, step=step):
             return
         self._maybe_run_periodic_test(state=state, kwargs=kwargs)
 
@@ -406,6 +406,8 @@ class MakeSenseMonitoringCallback(TrainerCallback):
                 }
             )
         self._update_progress(state)
+        if self._should_defer_evaluate_test_to_save(args=args, step=int(state.global_step)):
+            return
         self._maybe_run_periodic_test(state=state, kwargs=kwargs)
 
     def on_save(
@@ -415,7 +417,7 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs: Any,
     ) -> None:
-        return None
+        self._maybe_run_periodic_test(state=state, kwargs=kwargs)
 
     def on_train_end(
         self,
@@ -447,16 +449,36 @@ class MakeSenseMonitoringCallback(TrainerCallback):
             and self.tester.has_rows()
         )
 
-    def _should_defer_step_test_to_evaluate(self, *, args: TrainingArguments, step: int) -> bool:
-        if not self._should_test(step):
-            return False
+    def _strategy_is_disabled(self, strategy: Any) -> bool:
+        return strategy is None or str(strategy).lower().endswith("no")
+
+    def _is_eval_step(self, *, args: TrainingArguments, step: int) -> bool:
         eval_steps = getattr(args, "eval_steps", None)
         if not eval_steps:
             return False
         eval_strategy = getattr(args, "eval_strategy", getattr(args, "evaluation_strategy", None))
-        if eval_strategy is None or str(eval_strategy).lower().endswith("no"):
+        if self._strategy_is_disabled(eval_strategy):
             return False
         return step % int(eval_steps) == 0
+
+    def _is_save_step(self, *, args: TrainingArguments, step: int) -> bool:
+        save_steps = getattr(args, "save_steps", None)
+        if not save_steps:
+            return False
+        save_strategy = getattr(args, "save_strategy", None)
+        if self._strategy_is_disabled(save_strategy):
+            return False
+        return step % int(save_steps) == 0
+
+    def _should_defer_step_test_to_later_callback(self, *, args: TrainingArguments, step: int) -> bool:
+        if not self._should_test(step):
+            return False
+        return self._is_eval_step(args=args, step=step) or self._is_save_step(args=args, step=step)
+
+    def _should_defer_evaluate_test_to_save(self, *, args: TrainingArguments, step: int) -> bool:
+        if not self._should_test(step):
+            return False
+        return self._is_save_step(args=args, step=step)
 
     def _maybe_run_periodic_test(self, *, state: TrainerState, kwargs: dict[str, Any]) -> dict[str, Any] | None:
         step = int(state.global_step)

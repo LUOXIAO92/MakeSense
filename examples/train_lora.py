@@ -48,7 +48,7 @@ TRANSLATION_TASK_CONFIG = {
 
 
 # --- Output / checkpoint controls ---
-OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it"
+OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it-2"
 CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
@@ -75,11 +75,11 @@ LORA_TARGET_MODULES = (
 
 
 # --- Trainer controls ---
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 0.0
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
-LR_SCHEDULER_TYPE = "cosine"  # "linear" | "cosine" | "constant" | "constant_with_warmup"
+LR_SCHEDULER_TYPE = "linear"  # "linear" | "cosine" | "constant" | "constant_with_warmup"
 MAX_GRAD_NORM = 1.0
 NUM_TRAIN_EPOCHS = 5
 MAX_STEPS = -1
@@ -94,7 +94,7 @@ SAVE_STEPS = 300
 TEST_STEPS = 300
 TEST_MAX_NEW_TOKENS = 512
 TEST_RECORD_COUNT = -1
-TEST_BATCH_SIZE = 20
+TEST_BATCH_SIZE = 30
 TEST_OUTPUT_MARKDOWN = True
 CUDA_EMPTY_CACHE_STEPS: int | None = 1
 TEST_CUDA_EMPTY_CACHE_STEPS: int | None = None
@@ -126,6 +126,7 @@ def load_base_model():
         device_map="auto",
         quantization_config=quantization_config,
         trust_remote_code=True,
+        attn_implementation="flash_attention_2"
     )
     if LOAD_IN_4BIT:
         base_model = prepare_multimodal_model_for_kbit_lora_training(base_model)
