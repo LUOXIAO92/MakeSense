@@ -61,6 +61,7 @@ class LoraTrainConfig:
     audio_chunk_seconds: float = 1.0
     learning_rate: float = 2e-4
     weight_decay: float = 0.0
+    optimizer: str = "adamw"
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
     lr_scheduler_type: str = "linear"
@@ -106,6 +107,17 @@ def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def training_arguments_optimizer_name(optimizer: str) -> str:
+    """Map the user-facing optimizer name to Transformers TrainingArguments.optim."""
+
+    normalized = str(optimizer).strip().lower()
+    if normalized == "adamw":
+        return "adamw_torch"
+    if normalized == "adamw8bit":
+        return "adamw_bnb_8bit"
+    raise ValueError("optimizer must be one of {'adamw', 'adamw8bit'}")
 
 
 class CudaEmptyCacheCallback:
@@ -536,6 +548,7 @@ def _format_startup_metadata(
         f"  - AUDIO_CHUNK_SECONDS: {train_config.audio_chunk_seconds}",
         "",
         "Training Steps",
+        f"  - OPTIMIZER: {train_config.optimizer}",
         f"  - PER_DEVICE_TRAIN_BATCH_SIZE: {train_config.per_device_train_batch_size}",
         f"  - PER_DEVICE_EVAL_BATCH_SIZE: {train_config.per_device_eval_batch_size}",
         f"  - GRADIENT_ACCUMULATION_STEPS: {train_config.gradient_accumulation_steps}",
@@ -673,6 +686,7 @@ def train_lora(
         gradient_accumulation_steps=train_config.gradient_accumulation_steps,
         learning_rate=train_config.learning_rate,
         weight_decay=train_config.weight_decay,
+        optim=training_arguments_optimizer_name(train_config.optimizer),
         adam_beta1=train_config.adam_beta1,
         adam_beta2=train_config.adam_beta2,
         lr_scheduler_type=train_config.lr_scheduler_type,
@@ -684,6 +698,7 @@ def train_lora(
         eval_accumulation_steps=train_config.eval_accumulation_steps,
         save_steps=train_config.save_steps,
         max_grad_norm=train_config.max_grad_norm,
+        bf16=True,
         max_steps=train_config.max_steps,
         report_to="none",
         seed=train_config.seed,
@@ -734,9 +749,9 @@ def train_lora(
     )
     callbacks = []
     cuda_empty_cache_callback = _maybe_cuda_empty_cache_callback(train_config.cuda_empty_cache_steps)
+    callbacks.append(monitoring_callback)
     if cuda_empty_cache_callback is not None:
         callbacks.append(cuda_empty_cache_callback)
-    callbacks.append(monitoring_callback)
     trainer = Trainer(
         model=model,
         args=args,

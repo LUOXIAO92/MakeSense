@@ -1,7 +1,10 @@
 """Train a MakeSense LoRA adapter from final pipeline-9 dataset output."""
 
+import os
 import sys
 sys.path.append("src")
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,garbage_collection_threshold:0.9" 
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "backend:cudaMallocAsync"
 
 import warnings
 
@@ -25,9 +28,8 @@ from train.continue_utils import prepare_lora_model_for_continue, resolve_contin
 
 
 # --- Dataset controls ---
-import os
-DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
-# DATASET_ROOT = Path("dataset_test")
+# DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+DATASET_ROOT = Path("dataset_test")
 TOTAL_SAMPLES: int | None = None
 MAX_WINDOW_SIZE = -1
 SEED = 4021
@@ -43,14 +45,14 @@ SPLIT_RATIO: tuple[float, float, float] = (0.8975, 0.1, 0.0025)
 # fixed_window/conservative, min=None means 1.
 TRANSLATION_TASK_CONFIG = {
     "natural":      {"ratio": 2},
-    "fixed_window": {"ratio": 4, "min": None, "max": None},
-    "conservative": {"ratio": 4, "min": None, "max": None},
+    "fixed_window": {"ratio": 4, "min": 1, "max": 10},
+    "conservative": {"ratio": 4, "min": 1, "max": 10},
 }
 
 
 # --- Output / checkpoint controls ---
-OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it-2"
-CONTINUE_TYPE = "resume"  # "none" | "resume" | "branch"
+OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it"
+CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
 
@@ -75,28 +77,29 @@ LORA_TARGET_MODULES = (
 
 
 # --- Trainer controls ---
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.0
+OPTIMIZER = "adamw"  # "adamw" | "adamw8bit"
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
 LR_SCHEDULER_TYPE = "linear"  # "linear" | "cosine" | "constant" | "constant_with_warmup"
 MAX_GRAD_NORM = 1.0
-NUM_TRAIN_EPOCHS = 5
+NUM_TRAIN_EPOCHS = 20
 MAX_STEPS = -1
 PER_DEVICE_TRAIN_BATCH_SIZE = 1
-PER_DEVICE_EVAL_BATCH_SIZE = 5
-GRADIENT_ACCUMULATION_STEPS = 16
+PER_DEVICE_EVAL_BATCH_SIZE = 4
+GRADIENT_ACCUMULATION_STEPS = 8
 WARMUP_STEPS = int(0.01 * 24000 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
 LOGGING_STEPS = 1
 EVAL_ACCUMULATION_STEPS = 1
-EVAL_STEPS = 300
-SAVE_STEPS = 300
-TEST_STEPS = 300
-TEST_MAX_NEW_TOKENS = 128
+EVAL_STEPS = 50
+SAVE_STEPS = 50
+TEST_STEPS = 50
+TEST_MAX_NEW_TOKENS = 256
 TEST_RECORD_COUNT = -1
-TEST_BATCH_SIZE = 10
+TEST_BATCH_SIZE = 30
 TEST_OUTPUT_MARKDOWN = True
-CUDA_EMPTY_CACHE_STEPS: int | None = 1
+CUDA_EMPTY_CACHE_STEPS: int | None = None
 TEST_CUDA_EMPTY_CACHE_STEPS: int | None = None
 
 
@@ -169,6 +172,7 @@ def main() -> None:
         audio_chunk_seconds=AUDIO_CHUNK_SECONDS,
         learning_rate=LEARNING_RATE,
         weight_decay=WEIGHT_DECAY,
+        optimizer=OPTIMIZER,
         adam_beta1=ADAM_BETA1,
         adam_beta2=ADAM_BETA2,
         lr_scheduler_type=LR_SCHEDULER_TYPE,

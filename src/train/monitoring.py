@@ -13,6 +13,7 @@ import torch
 from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
 from train.tester import StreamingSampleTester, format_test_outputs_markdown, print_test_summary
+from train.vram import cuda_vram_usage_gib, format_vram_usage
 
 
 def _json_default(value: Any) -> Any:
@@ -93,6 +94,7 @@ def format_monitoring_progress_line(
     total: int | None,
     prefix: str,
     elapsed_seconds: float,
+    vram_usage: tuple[float, float, float, float] | None = None,
 ) -> str:
     """Format a short single-line training progress message without a visual bar."""
 
@@ -102,7 +104,8 @@ def format_monitoring_progress_line(
         progress = f"{percentage}%, {step}/{total}"
     else:
         progress = f"step={step}"
-    return f"{progress} | {prefix}, train_time={format_training_time(elapsed_seconds)}"
+    _ = elapsed_seconds
+    return f"{progress} | {prefix} | {format_vram_usage(vram_usage)}"
 
 
 def tensorboard_scalar_tag(metric_name: str) -> str:
@@ -185,6 +188,14 @@ class _SingleLineProgress:
         self._last_step = 0
         self._started_at: float | None = None
 
+    def reset_vram_peak(self) -> None:
+        if not torch.cuda.is_available():
+            return
+        try:
+            torch.cuda.reset_peak_memory_stats()
+        except Exception:
+            pass
+
     def start(self, *, initial: int = 0) -> None:
         if self._bar is not None:
             return
@@ -221,8 +232,12 @@ class _SingleLineProgress:
                 total=self.total,
                 prefix=prefix,
                 elapsed_seconds=elapsed,
+                vram_usage=self._vram_usage(),
             )
         )
+
+    def _vram_usage(self) -> tuple[float, float, float, float] | None:
+        return cuda_vram_usage_gib(reset_peak=False)
 
     def break_line(self) -> None:
         self.start()
@@ -353,6 +368,8 @@ class MakeSenseMonitoringCallback(TrainerCallback):
         **kwargs: Any,
     ) -> None:
         self.tensorboard_writer.start()
+        if self.progress is not None:
+            self.progress.reset_vram_peak()
 
     def on_step_end(
         self,

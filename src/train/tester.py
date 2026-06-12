@@ -10,6 +10,7 @@ from typing import Any
 import torch
 
 from train.formatting import ChatMessage
+from train.vram import cuda_vram_usage_gib, format_vram_usage
 
 
 def render_chat(
@@ -151,6 +152,7 @@ class StreamingSampleTester:
             None if test_cuda_empty_cache_steps is None else int(test_cuda_empty_cache_steps)
         )
         self._generate_batch_count = 0
+        self._last_generate_vram_usage: tuple[float, float, float, float] | None = None
 
     def has_rows(self) -> bool:
         return bool(self.selected_count() > 0)
@@ -300,6 +302,7 @@ class StreamingSampleTester:
                 record_count=state.record_count,
                 turn_number=state.next_turn_offset,
                 turn_count=len(state.assistant_indices),
+                vram_usage=self._last_generate_vram_usage,
             )
             self._advance_test_progress(progress)
 
@@ -341,6 +344,7 @@ class StreamingSampleTester:
             for row_index, prompt_length in enumerate(prompt_lengths):
                 start = padded_prompt_length if int(generated.shape[1]) >= padded_prompt_length else prompt_length
                 output_ids.append(generated[row_index:row_index + 1, start:].detach().cpu())
+            self._last_generate_vram_usage = cuda_vram_usage_gib(reset_peak=False)
             return output_ids
         finally:
             del generated
@@ -441,12 +445,14 @@ class StreamingSampleTester:
         record_count: int | None,
         turn_number: int,
         turn_count: int,
+        vram_usage: tuple[float, float, float, float] | None = None,
     ) -> None:
         if progress is None:
             return
         record_text = "?/?" if record_index is None or record_count is None else f"{record_index}/{record_count}"
         progress.set_description_str(
-            f"strict-test step={int(step)} record={record_text} turn={turn_number}/{turn_count} uid={uid}"
+            f"strict-test step={int(step)} record={record_text} turn={turn_number}/{turn_count} "
+            f"uid={uid} | {format_vram_usage(vram_usage)}"
         )
 
     @staticmethod

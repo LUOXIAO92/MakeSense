@@ -17,9 +17,9 @@ Inspired by following papers:
 - sense-unit translation: [SIMULSENSE: SENSE-DRIVEN INTERPRETING FOR EFFICIENT SIMULTANEOUS SPEECH TRANSLATION](https://arxiv.org/abs/2509.21932)
 
 In this project:
-- we **do not** train the sense-unit detector, audio encoder, or LLM backbone alignment from scratch;
-- we **do not** modify the model architecture; infinite-time streaming translation is handled by sliding-window context management at runtime;
-- we **do** create ground-truth-style datasets and pipeline validation surfaces so an omni model can learn simultaneous translation strategy;
+- I **do not** train the sense-unit detector, audio encoder, or LLM backbone alignment from scratch;
+- I **do not** modify the model architecture; infinite-time streaming translation is handled by sliding-window context management at runtime;
+- I **do** create ground-truth-style datasets and pipeline validation surfaces so an omni model can learn simultaneous translation strategy;
 
 ## Requirement
 
@@ -48,8 +48,8 @@ pip install git+https://github.com/LUOXIAO92/MultimodalAssistantMask.git
 
 ### Sub module dependence
 - Word aligner: [TransAlign: Machine Translation Encoders are Strong Word Aligners, Too](https://github.com/bebing93/transalign)
-- We use [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE) as deafult base model.
-- We also use [MultimodalAssistantMask](https://github.com/LUOXIAO92/MultimodalAssistantMask.git) to build assistant only loss for multimodal inputs.
+- I use [sentence-transformers/LaBSE](https://huggingface.co/sentence-transformers/LaBSE) as deafult base model.
+- I also use [MultimodalAssistantMask](https://github.com/LUOXIAO92/MultimodalAssistantMask.git) to build assistant only loss for multimodal inputs.
 
 ## Pipeline
 
@@ -111,11 +111,14 @@ Available now:
 - dataset builder pipeline, through final pipeline-9 JSONL export;
 - training example construction from the final dataset via `src/data_loader`;
 - initial real-audio LoRA trainer implementation via `examples/train_lora.py` and `src/train`;
+- **NEW**: [MakeSense-Emilia-Dataset](https://huggingface.co/datasets/luoxiao9231/MakeSense-Emilia-Dataset), license: cc-by-nc-4.0
+  - This dataset includes 8,000 audio/transcription records and 24,000 translation-strategy records in multi-turn conversation trajectory format. 
+  - This dataset is built through secondary processing of [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset). I sincerely thank the Emilia-Dataset project for this excellent multilingual audio dataset.
 
 TODO:
 - [x] **High priority**: test the thin LoRA trainer path with examples/train_lora.py on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly.
 - [ ] **High priority**: complete full LoRA training with `google/gemma-4-E2B-it`.
-  - **Ongoing**: we are preparing a large-scale dataset with 8,000 audio/transcription records and 24,000 translation-strategy records in multi-turn conversation trajectory format. The dataset will be available soon. It is built through secondary processing of [amphion/Emilia-Dataset](https://huggingface.co/datasets/amphion/Emilia-Dataset). We sincerely thank the Emilia-Dataset project for this excellent multilingual audio dataset.
+  - **Ongoing**: I'm still fighting with the best hyper parameters and optimizing the vram usage. 
 - [ ] **Second-highest priority:** add an inference backend for running the trained streaming model.
   - **Ongoing**: related work is tracked in [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git).
 - [ ] Add hot words and hot translations support for training and inference contexts.
