@@ -49,8 +49,61 @@ def truncate_at_generation_stop(text: str, generation_stop: str) -> str:
     return text[:boundary_index]
 
 
+def _as_int_token_ids(value: Any) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, int):
+        return [int(value)]
+    if isinstance(value, (list, tuple, set)):
+        return [int(item) for item in value if item is not None]
+    return []
+
+
+def _single_token_id_for_text(processor: Any, text: str) -> int | None:
+    tokenizer = getattr(processor, "tokenizer", None)
+    if tokenizer is None or not text:
+        return None
+    try:
+        tokenized = tokenizer(text, add_special_tokens=False)
+    except Exception:
+        return None
+    input_ids = tokenized.get("input_ids") if isinstance(tokenized, dict) else getattr(tokenized, "input_ids", None)
+    if isinstance(input_ids, torch.Tensor):
+        ids = [int(token) for token in input_ids.detach().cpu().flatten().tolist()]
+    elif isinstance(input_ids, list):
+        ids = [int(token) for token in input_ids]
+    else:
+        return None
+    return ids[0] if len(ids) == 1 else None
+
+
+def generation_stop_token_ids(processor: Any, *, generation_stop: str) -> set[int]:
+    tokenizer = getattr(processor, "tokenizer", None)
+    stop_ids: set[int] = set()
+    if tokenizer is not None:
+        stop_ids.update(_as_int_token_ids(getattr(tokenizer, "all_special_ids", None)))
+        stop_ids.update(_as_int_token_ids(getattr(tokenizer, "eos_token_id", None)))
+        stop_ids.update(_as_int_token_ids(getattr(tokenizer, "pad_token_id", None)))
+    generation_stop_id = _single_token_id_for_text(processor, generation_stop)
+    if generation_stop_id is not None:
+        stop_ids.add(generation_stop_id)
+    return stop_ids
+
+
+def truncate_output_ids_at_stop(output_ids: torch.Tensor, *, stop_token_ids: set[int]) -> torch.Tensor:
+    if not stop_token_ids:
+        return output_ids
+    flat_ids = [int(token) for token in output_ids.detach().cpu().flatten().tolist()]
+    stop_index = next((index for index, token in enumerate(flat_ids) if token in stop_token_ids), len(flat_ids))
+    return output_ids[:, :stop_index]
+
+
 def decode_generated_text(processor: Any, output_ids: torch.Tensor, *, generation_stop: str) -> str:
-    raw_debug = processor.batch_decode(output_ids, skip_special_tokens=False)
+    clean_ids = truncate_output_ids_at_stop(
+        output_ids,
+        stop_token_ids=generation_stop_token_ids(processor, generation_stop=generation_stop),
+    )
+    raw_debug = processor.batch_decode(clean_ids, skip_special_tokens=True)
     raw_text = str(raw_debug[0]) if raw_debug else ""
     return truncate_at_generation_stop(raw_text, generation_stop)
 
@@ -133,6 +186,10 @@ class StreamingSampleTester:
         enable_thinking: bool = False,
         test_batch_size: int = 1,
         test_cuda_empty_cache_steps: int | None = None,
+        generation_do_sample: bool | None = None,
+        generation_temperature: float | None = None,
+        generation_top_p: float | None = None,
+        generation_top_k: int | None = None,
     ) -> None:
         if not generation_stop:
             raise ValueError("StreamingSampleTester requires generation_stop")
@@ -140,6 +197,12 @@ class StreamingSampleTester:
             raise ValueError("test_batch_size must be positive")
         if test_cuda_empty_cache_steps is not None and int(test_cuda_empty_cache_steps) <= 0:
             raise ValueError("test_cuda_empty_cache_steps must be positive when provided")
+        if generation_temperature is not None and float(generation_temperature) < 0:
+            raise ValueError("generation_temperature must be positive when provided")
+        if generation_top_p is not None and not 0 < float(generation_top_p) <= 1:
+            raise ValueError("generation_top_p must be in (0, 1] when provided")
+        if generation_top_k is not None and int(generation_top_k) < 0:
+            raise ValueError("generation_top_k must be non-negative when provided")
         self.processor = processor
         self.test_rows = test_rows or []
         self.collator = collator
@@ -151,6 +214,10 @@ class StreamingSampleTester:
         self.test_cuda_empty_cache_steps = (
             None if test_cuda_empty_cache_steps is None else int(test_cuda_empty_cache_steps)
         )
+        self.generation_do_sample = generation_do_sample
+        self.generation_temperature = None if generation_temperature is None else float(generation_temperature)
+        self.generation_top_p = None if generation_top_p is None else float(generation_top_p)
+        self.generation_top_k = None if generation_top_k is None else int(generation_top_k)
         self._generate_batch_count = 0
         self._last_generate_vram_usage: tuple[float, float, float, float] | None = None
 
@@ -334,6 +401,7 @@ class StreamingSampleTester:
                 **batch,
                 max_new_tokens=self.test_max_new_tokens,
                 use_cache=True,
+                **self._generation_sampling_kwargs(),
             )
             if not isinstance(generated, torch.Tensor):
                 sequences = getattr(generated, "sequences", None)
@@ -351,6 +419,18 @@ class StreamingSampleTester:
             del input_ids
             del batch
             self._maybe_empty_cuda_cache_after_generate()
+
+    def _generation_sampling_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if self.generation_do_sample is not None:
+            kwargs["do_sample"] = bool(self.generation_do_sample)
+        if self.generation_temperature is not None:
+            kwargs["temperature"] = self.generation_temperature
+        if self.generation_top_p is not None:
+            kwargs["top_p"] = self.generation_top_p
+        if self.generation_top_k is not None:
+            kwargs["top_k"] = self.generation_top_k
+        return kwargs
 
     def _maybe_empty_cuda_cache_after_generate(self) -> None:
         if self.test_cuda_empty_cache_steps is None:

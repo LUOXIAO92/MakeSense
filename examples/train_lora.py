@@ -28,15 +28,15 @@ from train.continue_utils import prepare_lora_model_for_continue, resolve_contin
 
 
 # --- Dataset controls ---
-# DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
-DATASET_ROOT = Path("dataset_test")
+DATASET_ROOT = Path(os.environ["DATASET"]) /"audio"/"StreamingTranslation"/"Emilia-Dataset"
+# DATASET_ROOT = Path("dataset_test")
 TOTAL_SAMPLES: int | None = None
 MAX_WINDOW_SIZE = -1
 SEED = 4021
 
 # Dataset sampling group: repeat the source record pool, then shuffle and assign
 # task labels. `TASK_RATIO` is (translation, asr), and `SPLIT_RATIO` is (train, validate, test).
-DATASET_REPEAT = 1
+DATASET_REPEAT = 3
 TASK_RATIO: tuple[float, float] = (9, 1)
 SPLIT_RATIO: tuple[float, float, float] = (0.8975, 0.1, 0.0025)
 
@@ -51,7 +51,7 @@ TRANSLATION_TASK_CONFIG = {
 
 
 # --- Output / checkpoint controls ---
-OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it"
+OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it_3e-4_r16_adamw_bs16"
 CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
@@ -77,27 +77,27 @@ LORA_TARGET_MODULES = (
 
 
 # --- Trainer controls ---
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 3e-4
 WEIGHT_DECAY = 0.0
 OPTIMIZER = "adamw"  # "adamw" | "adamw8bit"
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
 LR_SCHEDULER_TYPE = "linear"  # "linear" | "cosine" | "constant" | "constant_with_warmup"
 MAX_GRAD_NORM = 1.0
-NUM_TRAIN_EPOCHS = 20
+NUM_TRAIN_EPOCHS = 3
 MAX_STEPS = -1
-PER_DEVICE_TRAIN_BATCH_SIZE = 1
-PER_DEVICE_EVAL_BATCH_SIZE = 4
+PER_DEVICE_TRAIN_BATCH_SIZE = 2
+PER_DEVICE_EVAL_BATCH_SIZE = 2
 GRADIENT_ACCUMULATION_STEPS = 8
-WARMUP_STEPS = int(0.01 * 24000 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
+WARMUP_STEPS = 0.05 #int(0.01 * 24000 * DATASET_REPEAT * SPLIT_RATIO[0] * NUM_TRAIN_EPOCHS / GRADIENT_ACCUMULATION_STEPS)
 LOGGING_STEPS = 1
 EVAL_ACCUMULATION_STEPS = 1
-EVAL_STEPS = 50
-SAVE_STEPS = 50
-TEST_STEPS = 50
+EVAL_STEPS = 300
+SAVE_STEPS = 300
+TEST_STEPS = 300
 TEST_MAX_NEW_TOKENS = 256
 TEST_RECORD_COUNT = -1
-TEST_BATCH_SIZE = 30
+TEST_BATCH_SIZE = 15
 TEST_OUTPUT_MARKDOWN = True
 CUDA_EMPTY_CACHE_STEPS: int | None = None
 TEST_CUDA_EMPTY_CACHE_STEPS: int | None = None
