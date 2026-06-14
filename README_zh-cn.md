@@ -271,7 +271,15 @@ assistant
 ...
 ```
 
-## 小规模验证结果 (`google/gemma-4-E2B-it`, `train_examples: 21540`):
+## 推理框架说明：并发多模态生成中的约束解码
+
+下面的大规模验证结果是 `batch=1` 的真实测试结果。它们评估的是单条样本的真实 rollout：每一轮生成的模型输出都会被放回下一轮提示词。因此，这些结果反映的是没有并发 / 批处理生成影响时的协议遵守情况。这是当前大规模训练后的验证记录，不表示超参数已经达到最优。
+
+在推理框架开发中，只要存在并发或批处理生成，就会有额外风险：同一个请求单独运行和放进 batch 运行时，下一 token 的候选分数可能不完全一致；当候选分数接近时，第一或第二偏好的 token 可能交换位置。这会影响采样，也可能让协议化输出偏离允许格式。本次多批次 vs 单批次调查中，Gemma4 音频文本的这种风险比对照模型和纯文本基线更明显。
+
+本项目构建推理后端时，会考虑使用约束解码，例如 vLLM guided decoding / structured outputs 或 llama.cpp GBNF grammar，把输出限制在目前支持的六种协议形式内。详情见 [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md)。
+
+## 大规模验证结果 (`google/gemma-4-E2B-it`, `train_examples: 21540`):
 
 ### 训练参数
 
@@ -381,7 +389,7 @@ Hyper Parmeters
 #### 第 300 步测试输出
 
 - 容忍窗口大小：1.0 秒
-- 以下是小规模测试结果，左侧是标准答案，右侧是模型输出。
+- 以下是选取的测试样例，左侧是标准答案，右侧是模型输出。
 
 ```text
 ## Test Example 2 / 60

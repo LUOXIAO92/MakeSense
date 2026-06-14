@@ -19,7 +19,7 @@ from transformers import AutoModelForMultimodalLM, AutoProcessor, BitsAndBytesCo
 
 from data_loader.dataset import build_training_dataset
 from train import TrainingDataConfig, prepare_multimodal_model_for_kbit_lora_training
-from train.lora_trainer import MakeSenseAudioCollator, _build_train_validate_test_rows
+from train.lora_trainer import _build_train_validate_test_rows
 from train.tester import StreamingSampleTester, format_test_outputs_markdown, print_test_summary
 
 
@@ -40,7 +40,7 @@ TRANSLATION_TASK_CONFIG = {
 
 # --- Model / adapter controls ---
 MODEL_NAME = "google/gemma-4-E2B-it"
-ADAPTER_PATH: str | Path = Path("outputs") / "makesense_lora_gemma-4-E2B-it-lr3e-4_adamw" / "checkpoint-2100"
+ADAPTER_PATH: str | Path = Path("outputs") / "makesense_lora_gemma-4-E2B-it_3e-4_r16_adamw_bs16" / "checkpoint-4500"
 LOAD_IN_4BIT = True
 AUDIO_SAMPLING_RATE = 16000
 AUDIO_CHUNK_SECONDS = 1.0
@@ -55,11 +55,11 @@ TEST_RECORD_COUNT = -1
 TEST_BATCH_SIZE = 1
 TEST_CUDA_EMPTY_CACHE_STEPS: int | None = None
 TEST_OUTPUT_MARKDOWN = True
-TEST_OUTPUT_PATH: Path | None = Path("outputs") / "standalone_lora_strict_test_3e-4_.md"
-GENERATION_DO_SAMPLE: bool | None = False
-GENERATION_TEMPERATURE: float | None = None
-GENERATION_TOP_P: float | None = None
-GENERATION_TOP_K: int | None = None
+TEST_OUTPUT_PATH: Path | None = Path("outputs") / "standalone_lora_strict_test_3e-4_r16_adamw_bs16_step4500_testbs1_fixed_temp1.md"
+GENERATION_DO_SAMPLE: bool | None = True
+GENERATION_TEMPERATURE: float | None = 1
+GENERATION_TOP_P: float | None = 0.95
+GENERATION_TOP_K: int | None = 20
 
 
 def make_data_config() -> TrainingDataConfig:
@@ -131,18 +131,11 @@ def main() -> None:
     data_config = make_data_config()
     processor = load_processor()
     model = load_lora_model()
-    collator = MakeSenseAudioCollator(
-        processor,
-        audio_sampling_rate=AUDIO_SAMPLING_RATE,
-        audio_chunk_seconds=AUDIO_CHUNK_SECONDS,
-        assistant_header=ASSISTANT_HEADER,
-        assistant_end=ASSISTANT_END,
-        generation_stop=GENERATION_STOP,
-    )
     tester = StreamingSampleTester(
         processor=processor,
         test_rows=build_test_rows(data_config),
-        collator=collator,
+        audio_sampling_rate=AUDIO_SAMPLING_RATE,
+        audio_chunk_seconds=AUDIO_CHUNK_SECONDS,
         test_max_new_tokens=TEST_MAX_NEW_TOKENS,
         test_record_count=TEST_RECORD_COUNT,
         test_batch_size=TEST_BATCH_SIZE,

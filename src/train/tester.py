@@ -9,6 +9,7 @@ from typing import Any
 
 import torch
 
+from train.audio import audio_chunks_for_example
 from train.formatting import ChatMessage
 from train.vram import cuda_vram_usage_gib, format_vram_usage
 
@@ -77,35 +78,43 @@ def _single_token_id_for_text(processor: Any, text: str) -> int | None:
     return ids[0] if len(ids) == 1 else None
 
 
-def generation_stop_token_ids(processor: Any, *, generation_stop: str) -> set[int]:
+def generation_stop_token_id(processor: Any, *, generation_stop: str) -> int:
+    if not generation_stop:
+        raise ValueError("generation_stop must not be empty")
     tokenizer = getattr(processor, "tokenizer", None)
-    stop_ids: set[int] = set()
+    if tokenizer is None:
+        raise ValueError("Strict-test generation_stop requires processor.tokenizer")
+    token_id = _single_token_id_for_text(processor, generation_stop)
+    if token_id is None:
+        raise ValueError(
+            "Strict-test generation_stop must encode to exactly one tokenizer token so it can be "
+            f"passed through native model.generate(eos_token_id=...): {generation_stop!r}"
+        )
+    return token_id
+
+
+def generation_eos_token_ids(processor: Any, *, generation_stop: str) -> list[int] | None:
+    tokenizer = getattr(processor, "tokenizer", None)
+    eos_ids: list[int] = []
     if tokenizer is not None:
-        stop_ids.update(_as_int_token_ids(getattr(tokenizer, "all_special_ids", None)))
-        stop_ids.update(_as_int_token_ids(getattr(tokenizer, "eos_token_id", None)))
-        stop_ids.update(_as_int_token_ids(getattr(tokenizer, "pad_token_id", None)))
-    generation_stop_id = _single_token_id_for_text(processor, generation_stop)
-    if generation_stop_id is not None:
-        stop_ids.add(generation_stop_id)
-    return stop_ids
+        eos_ids.extend(_as_int_token_ids(getattr(tokenizer, "eos_token_id", None)))
+    eos_ids.append(generation_stop_token_id(processor, generation_stop=generation_stop))
+    deduped = list(dict.fromkeys(eos_ids))
+    return deduped or None
 
 
-def truncate_output_ids_at_stop(output_ids: torch.Tensor, *, stop_token_ids: set[int]) -> torch.Tensor:
-    if not stop_token_ids:
-        return output_ids
-    flat_ids = [int(token) for token in output_ids.detach().cpu().flatten().tolist()]
-    stop_index = next((index for index, token in enumerate(flat_ids) if token in stop_token_ids), len(flat_ids))
-    return output_ids[:, :stop_index]
+def generation_pad_token_id(processor: Any) -> int | None:
+    tokenizer = getattr(processor, "tokenizer", None)
+    if tokenizer is None:
+        return None
+    ids = _as_int_token_ids(getattr(tokenizer, "pad_token_id", None))
+    return ids[0] if ids else None
 
 
 def decode_generated_text(processor: Any, output_ids: torch.Tensor, *, generation_stop: str) -> str:
-    clean_ids = truncate_output_ids_at_stop(
-        output_ids,
-        stop_token_ids=generation_stop_token_ids(processor, generation_stop=generation_stop),
-    )
-    raw_debug = processor.batch_decode(clean_ids, skip_special_tokens=True)
+    raw_debug = processor.batch_decode(output_ids, skip_special_tokens=True)
     raw_text = str(raw_debug[0]) if raw_debug else ""
-    return truncate_at_generation_stop(raw_text, generation_stop)
+    return raw_text
 
 
 def decode_raw_generated_text(processor: Any, output_ids: torch.Tensor) -> str:
@@ -154,6 +163,28 @@ def temporarily_enable_generation_cache(model: Any):
                 setattr(owner, name, old_value)
 
 
+@contextmanager
+def temporarily_set_padding_side(processor: Any, padding_side: str):
+    """Temporarily delegate batch padding side to tokenizer/processor native handling."""
+
+    touched: list[tuple[Any, str, Any]] = []
+    for owner in (getattr(processor, "tokenizer", None), processor):
+        if owner is not None and hasattr(owner, "padding_side"):
+            touched.append((owner, "padding_side", getattr(owner, "padding_side", _MISSING)))
+            setattr(owner, "padding_side", padding_side)
+    try:
+        yield
+    finally:
+        for owner, name, old_value in reversed(touched):
+            if old_value is _MISSING:
+                try:
+                    delattr(owner, name)
+                except AttributeError:
+                    pass
+            else:
+                setattr(owner, name, old_value)
+
+
 @dataclass
 class _RolloutRecordState:
     example: Any
@@ -179,7 +210,8 @@ class StreamingSampleTester:
         *,
         processor: Any,
         test_rows: list[dict[str, Any]] | None,
-        collator: Any,
+        audio_sampling_rate: int,
+        audio_chunk_seconds: float,
         test_max_new_tokens: int,
         test_record_count: int,
         generation_stop: str,
@@ -205,7 +237,8 @@ class StreamingSampleTester:
             raise ValueError("generation_top_k must be non-negative when provided")
         self.processor = processor
         self.test_rows = test_rows or []
-        self.collator = collator
+        self.audio_sampling_rate = int(audio_sampling_rate)
+        self.audio_chunk_seconds = float(audio_chunk_seconds)
         self.test_max_new_tokens = test_max_new_tokens
         self.test_record_count = int(test_record_count)
         self.generation_stop = generation_stop
@@ -291,7 +324,11 @@ class StreamingSampleTester:
             messages=messages,
             system_prompt=str(messages[0]["content"]),
             assistant_indices=assistant_turn_indices(messages),
-            audio_chunks=self.collator._audio_chunks_for_example(example),
+            audio_chunks=audio_chunks_for_example(
+                example,
+                audio_sampling_rate=self.audio_sampling_rate,
+                audio_chunk_seconds=self.audio_chunk_seconds,
+            ),
             outputs=[],
             rollout_messages=[messages[0]],
             record_index=record_index,
@@ -382,7 +419,11 @@ class StreamingSampleTester:
     ) -> list[torch.Tensor]:
         if not rendered_texts:
             return []
-        batch = self.collator._call_processor(rendered_texts=rendered_texts, flat_audio_chunks=flat_audio_chunks)
+        with temporarily_set_padding_side(self.processor, "left"):
+            batch = self._call_generation_processor(
+                rendered_texts=rendered_texts,
+                flat_audio_chunks=flat_audio_chunks,
+            )
         generated: torch.Tensor | Any | None = None
         input_ids: torch.Tensor | None = None
         try:
@@ -390,18 +431,20 @@ class StreamingSampleTester:
             input_ids = batch.get("input_ids")
             if not isinstance(input_ids, torch.Tensor):
                 raise ValueError("Processor output does not contain tensor input_ids for sample generation")
-            attention_mask = batch.get("attention_mask")
-            if isinstance(attention_mask, torch.Tensor):
-                prompt_lengths = [int(length) for length in attention_mask.sum(dim=1).detach().cpu().tolist()]
-            else:
-                prompt_lengths = [int(input_ids.shape[1])] * int(input_ids.shape[0])
             padded_prompt_length = int(input_ids.shape[1])
+            generation_kwargs = self._generation_sampling_kwargs()
+            eos_token_id = generation_eos_token_ids(self.processor, generation_stop=self.generation_stop)
+            if eos_token_id is not None:
+                generation_kwargs["eos_token_id"] = eos_token_id
+            pad_token_id = generation_pad_token_id(self.processor)
+            if pad_token_id is not None:
+                generation_kwargs["pad_token_id"] = pad_token_id
             batch = move_tensor_batch_to_device(batch, model_device(model))
             generated = model.generate(
                 **batch,
                 max_new_tokens=self.test_max_new_tokens,
                 use_cache=True,
-                **self._generation_sampling_kwargs(),
+                **generation_kwargs,
             )
             if not isinstance(generated, torch.Tensor):
                 sequences = getattr(generated, "sequences", None)
@@ -409,9 +452,8 @@ class StreamingSampleTester:
                     raise ValueError("model.generate did not return tensor sequences")
                 generated = sequences
             output_ids: list[torch.Tensor] = []
-            for row_index, prompt_length in enumerate(prompt_lengths):
-                start = padded_prompt_length if int(generated.shape[1]) >= padded_prompt_length else prompt_length
-                output_ids.append(generated[row_index:row_index + 1, start:].detach().cpu())
+            for row_index in range(int(generated.shape[0])):
+                output_ids.append(generated[row_index:row_index + 1, padded_prompt_length:].detach().cpu())
             self._last_generate_vram_usage = cuda_vram_usage_gib(reset_peak=False)
             return output_ids
         finally:
@@ -419,6 +461,27 @@ class StreamingSampleTester:
             del input_ids
             del batch
             self._maybe_empty_cuda_cache_after_generate()
+
+    def _call_generation_processor(
+        self,
+        *,
+        rendered_texts: list[str],
+        flat_audio_chunks: list[torch.Tensor],
+    ) -> dict[str, Any]:
+        """Build inference/generation inputs without using the training collator."""
+
+        try:
+            batch = self.processor(
+                text=rendered_texts,
+                audio=[chunk.detach().cpu().to(dtype=torch.float32).numpy() for chunk in flat_audio_chunks],
+                return_tensors="pt",
+                padding=True,
+            )
+        except AttributeError as exc:
+            raise ValueError("Strict-test generation requires callable processor(text=..., audio=...)") from exc
+        except TypeError:
+            raise
+        return dict(batch)
 
     def _generation_sampling_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
@@ -558,7 +621,6 @@ class StreamingSampleTester:
 
 PROTOCOL_TAG_PATTERN = re.compile(r"</?(?:src|tgt)>")
 PROTOCOL_TAGS = ("<src>", "</src>", "<tgt>", "</tgt>")
-DEFAULT_ALLOWED_EOS_REMAINDERS = ("<turn|>", "<eos>", "</s>", "<|end_of_text|>")
 
 
 def parse_protocol_output(text: str) -> dict[str, Any]:
@@ -656,10 +718,7 @@ def _is_allowed_eos_remainder(text: str, *, generation_stop: str | None = None) 
     stripped = text.strip()
     if not stripped:
         return True
-    allowed = set(DEFAULT_ALLOWED_EOS_REMAINDERS)
-    if generation_stop:
-        allowed.add(generation_stop)
-    return stripped in allowed
+    return bool(generation_stop) and stripped == generation_stop
 
 
 def _is_wait_content(text: str | None) -> bool | None:

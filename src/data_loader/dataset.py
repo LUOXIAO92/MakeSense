@@ -125,19 +125,6 @@ def _read_jsonl(path: Path) -> list[dict]:
     return items
 
 
-def _metadata_from_transcription(source_language: str, transcription: Transcription) -> MetaData:
-    if not transcription.tokens:
-        raise ValueError(f"Cannot build metadata for {transcription.uid}: transcription has no tokens")
-    duration = max(token.end for token in transcription.tokens)
-    return MetaData(
-        uid=transcription.uid,
-        file_name="",
-        duration=duration,
-        sample_rate=0.0,
-        language=source_language,
-    )
-
-
 def load_metadata(dataset_root: str | Path) -> dict[tuple[str, str], MetaData]:
     """Load original metadata rows keyed by ``(source_language, uid)``."""
 
@@ -374,11 +361,13 @@ def _build_translation_source_records(dataset_root: str | Path) -> list[_Transla
                 f"source_language={loaded_translation.source_language}, uid={loaded_translation.translation.uid}"
             )
         transcription = transcriptions[key]
-        original_metadata = metadata_by_key.get(key)
-        metadata = original_metadata or _metadata_from_transcription(loaded_translation.source_language, transcription)
-        audio_path = _audio_path_from_metadata(dataset_root, loaded_translation.source_language, metadata) if original_metadata else str(
-            Path(dataset_root) / "audio" / loaded_translation.source_language / f"{transcription.uid}.wav"
-        )
+        if key not in metadata_by_key:
+            raise ValueError(
+                "Missing metadata for translation row: "
+                f"source_language={loaded_translation.source_language}, uid={loaded_translation.translation.uid}"
+            )
+        metadata = metadata_by_key[key]
+        audio_path = _audio_path_from_metadata(dataset_root, loaded_translation.source_language, metadata)
         source_records.append(
             _TranslationSourceRecord(
                 uid=loaded_translation.translation.uid,

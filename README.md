@@ -274,6 +274,14 @@ assistant
 ...
 ```
 
+## Inference framework note: constrained decoding for concurrent multimodal generation
+
+The large-scale validation results below are real test results with `batch=1`. They measure real rollout for one sample at a time: each model output is appended back into the next prompt. So these results reflect protocol compliance without concurrent / batched generation effects. They are validation records from the current large-scale training stage, not evidence that the hyperparameters are already optimal.
+
+As long as concurrent or batched generation exists, there is extra risk: the next-token candidate scores for the same request may not be exactly the same when the request runs alone versus inside a batch. When candidate scores are close, the first- or second-preferred token may swap. That can affect sampling and can also make protocol-style outputs drift outside the allowed forms. In this multi-batch vs single-batch investigation, this risk was more obvious for Gemma 4 audio+text than for the comparison models and the pure-text baseline.
+
+When building the inference backend for this project, constrained decoding will be used, for example vLLM guided decoding / structured outputs or llama.cpp GBNF grammar, to restrict outputs to the six currently supported protocol forms. See [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md) for details.
+
 ## Large-scale validation results (`google/gemma-4-E2B-it`, `train_examples: 21540`):
 
 ### Training paramenters
@@ -385,7 +393,7 @@ These strict streaming test metrics measure protocol validity, generation stoppi
 #### Test Outputs - step 300
 
 - tolerance window size: 1.0 s
-- Following is small scale test, left is ground truth, right is model output. 
+- The following selected test examples show ground truth on the left and model output on the right.
 
 ```text
 Test Metrics
