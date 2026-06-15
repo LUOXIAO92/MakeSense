@@ -118,6 +118,7 @@ EXTRA_BODY = {"thinking": {"type": "disabled"}}
 할 일:
 - [x] **높은 우선순위**: 아주 작은 샘플로 `examples/train_lora.py` 를 실행해 대화 템플릿, 어시스턴트 부분만의 손실, 1〜2단계 학습이 제대로 동작하는지 확인한다.
 - [ ] **높은 우선순위**: `google/gemma-4-E2B-it` 의 LoRA 학습을 끝까지 실행한다.
+  - **완료**: 초기 `gemma-4-E2B-it` 대규모 학습과 평가가 완료되었습니다. [LoRA 는 여기에 있습니다](/lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100). 자세한 데이터는 아래 결과의 지표 섹션을 참고하십시오.
   - **진행 중**: 더 나은 하이퍼파라미터를 찾고 있으며, VRAM 사용량도 계속 최적화하고 있습니다.
 - [ ] **두 번째 우선순위:** 학습된 스트리밍 모델을 실행하기 위한 추론 백엔드 를 추가한다.
   - **진행 중**: 추론 쪽 구현은 [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git) 에서 진행하고 있습니다.
@@ -387,6 +388,20 @@ Hyper Parmeters
 
 - 의미: 선택된 모든 테스트 레코드에서 실제로 평가한 어시스턴트 턴의 총수입니다.
 - 계산: `records` 안에서 생성 및 평가 대상이 된 어시스턴트 출력을 모두 합산합니다.
+
+#### 지표: Gemma-4-E2B-it, learning rate=3e-4, rank=16, batch size=16, bnb4bit, adamw
+
+**테스트 지표**:
+- 종합 최고 - step 8100
+
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_metrics_plot.png)
+
+엄격 테스트 결과는 [strict test](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_outputs)를 참고하십시오.
+
+**학습**:
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/train_loss.png)
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/learning_rage_schedule.png)
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/eval_loss.png)
 
 #### 300단계 테스트 출력
 

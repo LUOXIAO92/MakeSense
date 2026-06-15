@@ -116,7 +116,8 @@ EXTRA_BODY = {"thinking": {"type": "disabled"}}
 待办：
 - [x] **高优先级**：用极小样本跑通 `examples/train_lora.py`，确认对话渲染、仅助手侧损失和 1-2 个训练步骤正常。
 - [ ] **高优先级**：完成 `google/gemma-4-E2B-it` 的完整 LoRA 训练。
-  - **进行中**：目前仍在调试更合适的超参数，并继续优化 VRAM 使用。
+  - **已完成**：初步的 `gemma-4-E2B-it` 大规模训练和测评，[lora 放在这里](/lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100)。详细数据请参照后半部分结果的指标小节。
+  - **进行中**：目前仍在调试更合适的超参数。
 - [ ] **次高优先级：** 增加推理后端，用于运行训练好的流式模型。
   - **进行中**：推理侧的实现正在 [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git) 中推进。
 - [ ] 为训练和推理上下文增加热词和指定译法支持。
@@ -275,9 +276,7 @@ assistant
 
 下面的大规模验证结果是 `batch=1` 的真实测试结果。它们评估的是单条样本的真实 rollout：每一轮生成的模型输出都会被放回下一轮提示词。因此，这些结果反映的是没有并发 / 批处理生成影响时的协议遵守情况。这是当前大规模训练后的验证记录，不表示超参数已经达到最优。
 
-在推理框架开发中，只要存在并发或批处理生成，就会有额外风险：同一个请求单独运行和放进 batch 运行时，下一 token 的候选分数可能不完全一致；当候选分数接近时，第一或第二偏好的 token 可能交换位置。这会影响采样，也可能让协议化输出偏离允许格式。本次多批次 vs 单批次调查中，Gemma4 音频文本的这种风险比对照模型和纯文本基线更明显。
-
-本项目构建推理后端时，会考虑使用约束解码，例如 vLLM guided decoding / structured outputs 或 llama.cpp GBNF grammar，把输出限制在目前支持的六种协议形式内。详情见 [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md)。
+只要存在并发或批处理生成，就会有额外风险：同一个请求单独运行和放进 batch 运行时，下一 token 的候选分数可能不完全一致；当候选分数接近时，第一或第二偏好的 token 可能交换位置。这会影响采样，也可能让协议化输出偏离允许格式。本次多批次 vs 单批次调查中，Gemma4 音频文本的这种风险比对照模型和纯文本基线更明显。因此本项目构建推理后端时候会使用约束解码，例如 vLLM guided decoding / structured outputs 或 llama.cpp GBNF grammar，把输出限制在目前支持的六种协议形式内。详情见 [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md)。
 
 ## 大规模验证结果 (`google/gemma-4-E2B-it`, `train_examples: 21540`):
 
@@ -385,6 +384,20 @@ Hyper Parmeters
 
 - 含义：所有被选中测试样本中，实际评估的助手轮次总数。
 - 计算：对 `records` 中所有生成并评估过的助手输出求和。
+
+#### 指标：Gemma-4-E2B-it，学习率=3e-4，rank=16，batch size=16，bnb4bit，adamw
+
+**测试指标**：
+- 综合最佳 - step 8100
+
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_metrics_plot.png)
+
+严格测试结果请参考 [strict test](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_outputs)。
+
+**训练**：
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/train_loss.png)
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/learning_rage_schedule.png)
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/eval_loss.png)
 
 #### 第 300 步测试输出
 

@@ -118,6 +118,7 @@ Available now:
 TODO:
 - [x] **High priority**: test the thin LoRA trainer path with examples/train_lora.py on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly.
 - [ ] **High priority**: complete full LoRA training with `google/gemma-4-E2B-it`.
+  - **Completed**: an initial large-scale `gemma-4-E2B-it` training and evaluation run is complete; the [LoRA checkpoint is here](/lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100). See the metrics section in the results below for detailed data.
   - **Ongoing**: I'm still fighting with the best hyper parameters and optimizing the vram usage. 
 - [ ] **Second-highest priority:** add an inference backend for running the trained streaming model.
   - **Ongoing**: related work is tracked in [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git).
@@ -389,8 +390,25 @@ These strict streaming test metrics measure protocol validity, generation stoppi
 - Meaning: the total number of assistant turns evaluated across all selected test records.
 - Calculation: sum of all generated/evaluated assistant outputs across `records`.
 
+#### Metrics: Gemma-4-E2B-it, learning rate=3e-4, rank=16, batch size=16, bnb4bit, adamw
+
+**Test metrics**:
+- best overall - step 8100
+
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_metrics_plot.png)
+
+Please refer to [strict test](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_outputs) to veiw the result of strict test.
+
+
+**Training**:
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/train_loss.png)
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/learning_rage_schedule.png)
+![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/eval_loss.png)
+
 
 #### Test Outputs - step 300
+
+**Note**: Following sample is not the case of above hyper parameters.
 
 - tolerance window size: 1.0 s
 - The following selected test examples show ground truth on the left and model output on the right.
