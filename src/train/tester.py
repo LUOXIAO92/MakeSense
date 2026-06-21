@@ -389,6 +389,7 @@ class StreamingSampleTester:
                     "postprocessed_output": postprocessed_output,
                     "extracted_protocol_output": protocol["normalized_output"],
                     "protocol_valid": protocol["valid"],
+                    "protocol_adherent": protocol_output_adherent(postprocessed_output, protocol),
                     "raw_turn_stopped": raw_turn_stopped(raw_output, postprocessed_output, self.generation_stop),
                     "postprocessed_turn_stopped": postprocessed_turn_stopped(
                         postprocessed_output,
@@ -722,9 +723,25 @@ def _is_allowed_eos_remainder(text: str, *, generation_stop: str | None = None) 
 
 
 def _is_wait_content(text: str | None) -> bool | None:
+    return protocol_field_is_wait(text)
+
+
+def protocol_field_is_wait(text: str | None) -> bool | None:
     if text is None:
         return None
     return text.strip() == "<|wait|>"
+
+
+def protocol_output_adherent(text: str, protocol: dict[str, Any] | None = None) -> bool:
+    protocol = parse_protocol_output(text) if protocol is None else protocol
+    if not bool(protocol["valid"]):
+        return False
+    if str(protocol.get("remainder") or "").strip():
+        return False
+    for field in (protocol.get("src"), protocol.get("tgt")):
+        if isinstance(field, str) and "<|wait|>" in field and protocol_field_is_wait(field) is not True:
+            return False
+    return True
 
 
 def raw_turn_stopped(raw_output: str, postprocessed_output: str, generation_stop: str) -> bool:
@@ -745,9 +762,7 @@ def postprocessed_turn_stopped(
 
 def summarize_test_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     total_turns = 0
-    protocol_valid_turns = 0
-    raw_turn_stop_turns = 0
-    postprocessed_turn_stop_turns = 0
+    protocol_adherent_turns = 0
     src_wait_total = 0
     src_wait_correct = 0
     tgt_wait_total = 0
@@ -762,12 +777,11 @@ def summarize_test_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             total_turns += 1
             gt_protocol = parse_protocol_output(str(output["ground_truth"]))
             model_protocol = parse_protocol_output(str(output["postprocessed_output"]))
-            if bool(output["protocol_valid"]):
-                protocol_valid_turns += 1
-            if bool(output["raw_turn_stopped"]):
-                raw_turn_stop_turns += 1
-            if bool(output["postprocessed_turn_stopped"]):
-                postprocessed_turn_stop_turns += 1
+            model_adherent = protocol_output_adherent(str(output["postprocessed_output"]), model_protocol)
+            if model_adherent:
+                protocol_adherent_turns += 1
+            else:
+                continue
 
             gt_src_wait = _is_wait_content(gt_protocol["src"])
             gt_tgt_wait = _is_wait_content(gt_protocol["tgt"])
@@ -794,9 +808,7 @@ def summarize_test_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "record_count": len(records),
         "turn_count": total_turns,
-        "protocol_valid_rate": _rate(protocol_valid_turns, total_turns),
-        "raw_turn_stop_rate": _rate(raw_turn_stop_turns, total_turns),
-        "postprocessed_turn_stop_rate": _rate(postprocessed_turn_stop_turns, total_turns),
+        "protocol_adherence_rate": _rate(protocol_adherent_turns, total_turns),
         "src_wait_accuracy": _rate(src_wait_correct, src_wait_total),
         "tgt_wait_accuracy": _rate(tgt_wait_correct, tgt_wait_total),
         "src_release_accuracy": _rate(src_release_correct, src_release_total),

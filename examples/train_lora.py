@@ -36,7 +36,7 @@ SEED = 4021
 
 # Dataset sampling group: repeat the source record pool, then shuffle and assign
 # task labels. `TASK_RATIO` is (translation, asr), and `SPLIT_RATIO` is (train, validate, test).
-DATASET_REPEAT = 3
+DATASET_REPEAT = 12
 TASK_RATIO: tuple[float, float] = (9, 1)
 SPLIT_RATIO: tuple[float, float, float] = (0.8975, 0.1, 0.0025)
 
@@ -51,8 +51,8 @@ TRANSLATION_TASK_CONFIG = {
 
 
 # --- Output / checkpoint controls ---
-OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it_3e-4_r16_adamw_bs16"
-CONTINUE_TYPE = "none"  # "none" | "resume" | "branch"
+OUTPUT_DIR = Path("outputs") / "makesense_lora_gemma-4-E2B-it_1.5e-4_r16_adamw_bs16_repeat12"
+CONTINUE_TYPE = "resume"  # "none" | "resume" | "branch"
 CHECKPOINT_PATH: str | Path | None = None # "outputs/makesense_lora1/checkpoint-100"
 SAVE_PROCESSOR = False
 
@@ -77,14 +77,14 @@ LORA_TARGET_MODULES = (
 
 
 # --- Trainer controls ---
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 1.5e-4
 WEIGHT_DECAY = 0.0
 OPTIMIZER = "adamw"  # "adamw" | "adamw8bit"
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
 LR_SCHEDULER_TYPE = "linear"  # "linear" | "cosine" | "constant" | "constant_with_warmup"
 MAX_GRAD_NORM = 1.0
-NUM_TRAIN_EPOCHS = 3
+NUM_TRAIN_EPOCHS = 1
 MAX_STEPS = -1
 PER_DEVICE_TRAIN_BATCH_SIZE = 2
 PER_DEVICE_EVAL_BATCH_SIZE = 2

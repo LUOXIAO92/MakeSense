@@ -577,11 +577,11 @@ def build_training_dataset(
     ``1`` by default, so zero-window training is included only when ``min`` is
     explicitly set to ``0``.
 
-    ``dataset_repeat`` repeats only the selected train source-record pool before
-    assigning task labels / translation subtask labels, so the same final dataset
-    row can appear in multiple training modes without duplicating validation or
-    test samples.  No ``**kwargs`` are used: all sampling controls are explicit
-    parameters.
+    ``dataset_repeat`` repeats only the selected train source-record pool.
+    Validation/test examples are built before the repeated train examples, so
+    train-side repetition cannot change validation/test task labels, sampled
+    translation windows, or final example order.  No ``**kwargs`` are used: all
+    sampling controls are explicit parameters.
     """
 
     if len(task_ratio) != 2:
@@ -611,26 +611,30 @@ def build_training_dataset(
     validate_source_records = sampled_source_records[train_end:validate_end]
     test_source_records = sampled_source_records[validate_end:test_end]
 
+    validate_examples = _build_training_examples_from_source_records(
+        rng,
+        validate_source_records,
+        task_ratio=task_ratio,
+        translation_task_config=translation_task_config,
+        max_window_size=max_window_size,
+    )
+    test_examples = _build_training_examples_from_source_records(
+        rng,
+        test_source_records,
+        task_ratio=task_ratio,
+        translation_task_config=translation_task_config,
+        max_window_size=max_window_size,
+    )
+    train_examples = _build_training_examples_from_source_records(
+        rng,
+        train_source_records,
+        task_ratio=task_ratio,
+        translation_task_config=translation_task_config,
+        max_window_size=max_window_size,
+    )
+
     return TrainingDatasetSplits(
-        train=_build_training_examples_from_source_records(
-            rng,
-            train_source_records,
-            task_ratio=task_ratio,
-            translation_task_config=translation_task_config,
-            max_window_size=max_window_size,
-        ),
-        validate=_build_training_examples_from_source_records(
-            rng,
-            validate_source_records,
-            task_ratio=task_ratio,
-            translation_task_config=translation_task_config,
-            max_window_size=max_window_size,
-        ),
-        test=_build_training_examples_from_source_records(
-            rng,
-            test_source_records,
-            task_ratio=task_ratio,
-            translation_task_config=translation_task_config,
-            max_window_size=max_window_size,
-        ),
+        train=train_examples,
+        validate=validate_examples,
+        test=test_examples,
     )

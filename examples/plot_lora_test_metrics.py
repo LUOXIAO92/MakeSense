@@ -1,8 +1,8 @@
-"""Plot LoRA strict-test metrics from a ``test_metrics.json`` file.
+"""Plot LoRA strict-test rate metrics from a ``test_metrics.json`` file.
 
-The training callback writes historical strict-test summaries to
-``OUTPUT_DIR/test_metrics.json``. This helper reads that file and renders the
-main protocol / wait / release rates as a PNG image.
+Training-time tests and vLLM batch summaries both write step-keyed strict-test
+summaries to ``test_metrics.json``. This helper renders the main protocol /
+wait / release rates as a PNG image.
 """
 
 from __future__ import annotations
@@ -17,16 +17,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-METRICS_JSON = Path("outputs/makesense_lora_gemma-4-E2B-it_3e-4_r16_adamw_bs16/test_metrics.json")
+METRICS_JSON = Path("outputs") / "makesense_lora_gemma-4-E2B-it_1.5e-4_r16_adamw_bs16_repeat12" / "test_metrics.json"
 OUT_PATH = None
 DPI = 150
 TITLE = "Strict test metrics over training steps\nGemma-4-E2B-it,lr=3e-4,rank=16,batch_size=16,bnb4bit,adamw"
 
 
 PLOT_METRICS = (
-    "protocol_valid_rate",
-    "raw_turn_stop_rate",
-    "postprocessed_turn_stop_rate",
+    "protocol_adherence_rate",
     "src_wait_accuracy",
     "tgt_wait_accuracy",
     "src_release_accuracy",
