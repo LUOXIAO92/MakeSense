@@ -275,6 +275,22 @@ assistant
 ...
 ```
 
+## Training Configs
+
+### Gemma4-E2B/E4B-it
+
+```python
+ASSISTANT_HEADER = "<|turn>model\n"
+ASSISTANT_END = "<turn|>"
+GENERATION_STOP = "<turn|>"
+
+LORA_TARGET_MODULES = (
+    r"^model\.language_model\.layers\.\d+\."
+    r"(self_attn\.(q_proj|k_proj|v_proj|o_proj)|"
+    r"mlp\.(gate_proj|up_proj|down_proj))$"
+)
+```
+
 ## Inference framework note: constrained decoding for concurrent multimodal generation
 
 The large-scale validation results below are real test results with `batch=1`. They measure real rollout for one sample at a time: each model output is appended back into the next prompt. So these results reflect protocol compliance without concurrent / batched generation effects. They are validation records from the current large-scale training stage, not evidence that the hyperparameters are already optimal.
@@ -323,22 +339,18 @@ Hyper Parmeters
 
 #### Metrics
 
-These strict streaming test metrics measure protocol validity, generation stopping behavior, and wait/release decisions for each assistant turn. Valid protocol units include ASR-only `<src>...</src>` turns and translation `<src>...</src><tgt>...</tgt>` turns. They do **not** directly measure ASR word accuracy or translation semantic quality.
+These strict streaming test metrics measure protocol adherence and wait/release decisions for each assistant turn. Clean protocol units include ASR-only `<src>...</src>` turns and translation `<src>...</src><tgt>...</tgt>` turns.
 
-**POSTPROCESSED_TURN_STOP_RATE**
+**PROTOCOL_ADHERENCE_RATE**
 
-- Meaning: the rate of turns whose postprocessed output stops cleanly at a closed protocol-tag boundary.
-- Calculation: `postprocessed_turn_stop_turns / TURN_COUNT`, where a turn counts as stopped when the parsed protocol unit is followed only by whitespace or an allowed EOS / generation-stop marker. Any non-EOS content outside the closed protocol tags fails this metric, such as trailing text, comma-separated tags, or repeated protocol chunks.
+- Meaning: the rate of turns whose model output follows the strict source/target protocol.
+- Calculation: `protocol_adherent_turns / TURN_COUNT`.
+- A turn is protocol-adherent when the full model output is exactly one clean `<src>...</src>` unit or one clean `<src>...</src><tgt>...</tgt>` unit.
+- `<src>` and `<tgt>` fields must contain clean transcription or translation text. They cannot contain nested `<src>` / `<tgt>` tags.
+- If a field contains `<|wait|>`, the stripped field content must equal `<|wait|>`.
+- Text outside the closed protocol unit, comma-joined chunks, repeated protocol chunks, broken tags, wrong tag order, and mixed wait/text fields fail this metric.
 
-**PROTOCOL_VALID_RATE**
-
-- Meaning: the rate of turns whose model output has legal source/target protocol tags.
-- Calculation: `protocol_valid_turns / TURN_COUNT`, where a turn is valid if it starts with a legal ASR-only unit `<src>...</src>` or translation unit `<src>...</src><tgt>...</tgt>`, with paired tags, legal order, and no nested source/target tags inside any field. This metric checks tag legality; out-of-tag continuation after a closed protocol unit is measured by `POSTPROCESSED_TURN_STOP_RATE`.
-
-**RAW_TURN_STOP_RATE**
-
-- Meaning: the rate of turns whose raw decoded generation stops at the configured generation stop token.
-- Calculation: `raw_turn_stop_turns / TURN_COUNT`, where a turn counts as stopped when the raw decoded text continues from the postprocessed text with `generation_stop`.
+All source/target wait/release accuracy metrics use protocol-adherent model turns as their denominator base. A non-adherent model turn only affects `PROTOCOL_ADHERENCE_RATE`. Fixed-window and conservative target metrics also keep the record-level window eligibility filter.
 
 **RECORD_COUNT**
 
@@ -347,407 +359,163 @@ These strict streaming test metrics measure protocol validity, generation stoppi
 
 **SRC_RELEASE_ACCURACY**
 
-- Meaning: among turns where the ground-truth source side should release transcription text, the rate at which the model also releases source text.
+- Meaning: among protocol-adherent model turns where the ground-truth source side should release transcription text, the rate at which the model also releases source text.
 - Calculation: `src_release_correct / SRC_RELEASE_TOTAL`. This checks only wait vs. non-wait behavior in `<src>...</src>`; it does not check whether the released transcription text is correct.
 
 **SRC_RELEASE_TOTAL**
 
-- Meaning: the number of turns where the ground-truth source side is a non-wait release.
-- Calculation: count of turns where ground-truth `<src>...</src>` is not `<|wait|>`.
+- Meaning: the number of protocol-adherent model turns where the ground-truth source side is a non-wait release.
+- Calculation: count of protocol-adherent model turns where ground-truth `<src>...</src>` is not `<|wait|>`.
 
 **SRC_WAIT_ACCURACY**
 
-- Meaning: among turns where the ground-truth source side should wait, the rate at which the model also waits on the source side.
+- Meaning: among protocol-adherent model turns where the ground-truth source side should wait, the rate at which the model also waits on the source side.
 - Calculation: `src_wait_correct / SRC_WAIT_TOTAL`. This checks only whether model `<src>...</src>` is `<|wait|>`.
 
 **SRC_WAIT_TOTAL**
 
-- Meaning: the number of turns where the ground-truth source side should wait.
-- Calculation: count of turns where ground-truth `<src>...</src>` is exactly `<|wait|>` after stripping whitespace.
+- Meaning: the number of protocol-adherent model turns where the ground-truth source side should wait.
+- Calculation: count of protocol-adherent model turns where ground-truth `<src>...</src>` is exactly `<|wait|>` after stripping whitespace.
 
 **TGT_RELEASE_ACCURACY**
 
-- Meaning: among turns where the ground-truth target side should release translation text, the rate at which the model also releases target text.
+- Meaning: among protocol-adherent model turns where the ground-truth target side should release translation text, the rate at which the model also releases target text.
 - Calculation: `tgt_release_correct / TGT_RELEASE_TOTAL`. This checks only wait vs. non-wait behavior in `<tgt>...</tgt>`; it does not check whether the released translation text is semantically correct.
 
 **TGT_RELEASE_TOTAL**
 
-- Meaning: the number of turns where the ground-truth target side is a non-wait release.
-- Calculation: count of turns where ground-truth `<tgt>...</tgt>` is not `<|wait|>`.
+- Meaning: the number of protocol-adherent model turns where the ground-truth target side is a non-wait release.
+- Calculation: count of protocol-adherent model turns where ground-truth `<tgt>...</tgt>` is not `<|wait|>`.
 
 **TGT_WAIT_ACCURACY**
 
-- Meaning: among turns where the ground-truth target side should wait, the rate at which the model also waits on the target side.
+- Meaning: among protocol-adherent model turns where the ground-truth target side should wait, the rate at which the model also waits on the target side.
 - Calculation: `tgt_wait_correct / TGT_WAIT_TOTAL`. This checks only whether model `<tgt>...</tgt>` is `<|wait|>`.
 
 **TGT_WAIT_TOTAL**
 
-- Meaning: the number of turns where the ground-truth target side should wait.
-- Calculation: count of turns where ground-truth `<tgt>...</tgt>` is exactly `<|wait|>` after stripping whitespace.
+- Meaning: the number of protocol-adherent model turns where the ground-truth target side should wait.
+- Calculation: count of protocol-adherent model turns where ground-truth `<tgt>...</tgt>` is exactly `<|wait|>` after stripping whitespace.
 
 **TURN_COUNT**
 
 - Meaning: the total number of assistant turns evaluated across all selected test records.
 - Calculation: sum of all generated/evaluated assistant outputs across `records`.
 
-#### Metrics: Gemma-4-E2B-it, learning rate=3e-4, rank=16, batch size=16, bnb4bit, adamw
+#### Metrics: Gemma-4-E2B-it, learning rate=1e-4, rank=16, batch size=16, bnb nf4 4bit, adamw
 
 **Test metrics**:
-- best overall - step 8100
 
-![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_metrics_plot.png)
+best overall - step 12000~15000 (early stop at step 15000)
 
-Please refer to [strict test](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/test_outputs) to veiw the result of strict test.
+- Average metrics:
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/test_metrics_plot.png)
+
+- Protocol adherence rate 
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/condition_metrics_plots/condition_protocol_adherence_rate.png)
+
+- Source release accuracy
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/condition_metrics_plots/condition_src_release_accuracy.png)
+
+- Source wait accuracy
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/condition_metrics_plots/condition_src_wait_accuracy.png)
+
+- Target release accuracy 
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/condition_metrics_plots/condition_tgt_release_accuracy.png)
+
+- Target wait accuracy 
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/condition_metrics_plots/condition_tgt_wait_accuracy.png)
+
+Please refer to [strict test](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics) to veiw the result of strict test.
 
 
 **Training**:
-![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/train_loss.png)
-![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/learning_rage_schedule.png)
-![](lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100/eval_loss.png)
-
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/training_metrics_plot.png)
 
 #### Test Outputs - step 300
 
-**Note**: Following sample is not the case of above hyper parameters.
-
 - tolerance window size: 1.0 s
 - The following selected test examples show ground truth on the left and model output on the right.
+- concurrency=90, so the process time is high
+- Unlike the stric test during the training, in the case of vllm, I did not find the degeneration of quality in multi-batch processing
 
-```text
-Test Metrics
-  - STEP: 300
-  - TOTAL_AVAILABLE_TEST_ROWS: 60
-  - SELECTED_TEST_ROWS: 60
-  - POSTPROCESSED_TURN_STOP_RATE: 1.0000
-  - PROTOCOL_VALID_RATE: 1.0000
-  - RAW_TURN_STOP_RATE: 1.0000
-  - RECORD_COUNT: 60
-  - SRC_RELEASE_ACCURACY: 0.9443
-  - SRC_RELEASE_TOTAL: 718
-  - SRC_WAIT_ACCURACY: 0.2450
-  - SRC_WAIT_TOTAL: 151
-  - TGT_RELEASE_ACCURACY: 0.7248
-  - TGT_RELEASE_TOTAL: 298
-  - TGT_WAIT_ACCURACY: 0.7996
-  - TGT_WAIT_TOTAL: 489
-  - TURN_COUNT: 869
+##### ASR
+
+**SYSTEM_PROMPT**: You are a professional transcriptionist. Transcribe what you hear.
 
 ---
 
-## Test Example 2 / 60
+- UID: JA_A7kJ7PmPk8g_W000017
 
-  - UID: EN_nLFyRxIRQBo_W000057
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Japanese. Tolerance window size is 2.
-
-1. <src>These people are </src><tgt><|wait|></tgt>  -  <src>These people are </src><tgt><|wait|></tgt>
-2. <src>completely rare, </src><tgt><|wait|></tgt>  -  <src>completely rare. </src><tgt><|wait|></tgt>
-3. <src>and they often </src><tgt>こうした人々は非常に稀です。そして、</tgt>  -  <src>And they often </src><tgt>これは完全に珍しいんです。そして、</tgt>
-4. <src>show up to </src><tgt><|wait|></tgt>  -  <src>show up </src><tgt><|wait|></tgt>
-5. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>to completely revolution- </src><tgt><|wait|></tgt>
-6. <src>completely revolutionize the world. </src><tgt>世界を根本から変えるような存在であることがよくあります。</tgt>  -  <src>ize the world. </src><tgt>世界を完全に根底から覆す人たちがよく登場します。</tgt>
-7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>The personality </src><tgt><|wait|></tgt>
-8. <src>Their personality is </src><tgt><|wait|></tgt>  -  <src>is something </src><tgt><|wait|></tgt>
-9. <src>something of a </src><tgt>彼らの性格は</tgt>  -  <src>of a contradiction. </src><tgt>彼らの個性は、ある種の矛盾をはらんでいます。</tgt>
-10. <src>contradiction. </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-11. <src>While they're </src><tgt><|wait|></tgt>  -  <src>While they're extroverted, </src><tgt><|wait|></tgt>
-12. <src>extroverted, </src><tgt>矛盾しています。外交的である一方、</tgt>  -  <src>they also </src><tgt>外向的であるにもかかわらず、彼らは</tgt>
-13. <src>they also hate </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-14. <src>meaningless conversations </src><tgt><|wait|></tgt>  -  <src>hate meaningless conversations. </src><tgt><|wait|></tgt>
-15. <src>and like to </src><tgt>無意味な会話は嫌います。そして、</tgt>  -  <src>And like </src><tgt>無意味な会話を嫌う、</tgt>
-16. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>it gets straight to the </src><tgt><|wait|></tgt>
-17. <src>get straight to the point. </src><tgt><|wait|></tgt>  -  <src>point. </src><tgt><|wait|></tgt>
-18. <src>They also love to </src><tgt>要点を突くのを好みます。また、</tgt>  -  <src>They also love to </src><tgt>まっすぐ本題に入りたいのです。彼らはまた</tgt>
-19. <src>play </src><tgt><|wait|></tgt>  -  <src>play the devil's advocate, </src><tgt><|wait|></tgt>
-20. <src>the devil's advocate, and they </src><tgt><|wait|></tgt>  -  <src>and </src><tgt><|wait|></tgt>
-21. <src><|wait|></src><tgt>あえて悪魔の代弁者を演じることを好み、</tgt>  -  <src>never shy away </src><tgt>逆説を好むし、</tgt>
-22. <src>never shy away from a debate. </src><tgt><|wait|></tgt>  -  <src>from a debate. </src><tgt><|wait|></tgt>
-23. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-24. <src><|wait|></src><tgt>議論を避けることはありません。</tgt>  -  <src>EHCPS </src><tgt>議論を避けることは決してありません。EHCPSの</tgt>
-25. <src>ENTP stands for </src><tgt><|wait|></tgt>  -  <src>stand for. </src><tgt><|wait|></tgt>
+  | round | ground truth | predict | process time (ms) |
+  |---|---|---|---|
+  | 1 | `<src>最初から</src>` | `<src>最初から</src>` | 1848 |
+  | 2 | `<src>あの特に</src>` | `<src>あの</src>` | 865 |
+  | 3 | `<src>これなんかまだ</src>` | `<src>特に</src>` | 1508 |
+  | 4 | `<src>一年生ですからね。</src>` | `<src>中まだ1年生からね。</src>` | 545 |
+  | 5 | `<src>この時点で</src>` | `<src>はい、はい。</src>` | 907 |
+  | 6 | `<src>こう短く</src>` | `<src>その時点で</src>` | 2451 |
+  | 7 | `<src>剪定を</src>` | `<src>こう</src>` | 380 |
+  | 8 | `<src><\|wait\|></src>` | `<src>資格を</src>` | 2015 |
+  | 9 | `<src>こうタイズしてってあげると</src>` | `<src>とりあえず</src>` | 2086 |
+  | 10 | `<src>十年経っても</src>` | `<src>資格を</src>` | 762 |
+  | 11 | `<src>大した。</src>` | `<src>持っても</src>` | 2292 |
 
 ---
 
-## Test Example 9 / 60
+- UID: ZH_B00041_S00155_W000028
 
-  - UID: EN_nSOXneMb4Ec_W000365
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Keep at least 3 wait windows before each target release.
-
-1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-2. <src>Meaningful individual </src><tgt><|wait|></tgt>  -  <src>Meaningful individual </src><tgt><|wait|></tgt>
-3. <src>right, </src><tgt><|wait|></tgt>  -  <src>right, </src><tgt><|wait|></tgt>
-4. <src>and the Supreme Court </src><tgt>有意义的个人权利，而最高法院</tgt>  -  <src>and the Supreme Court </src><tgt>有意义的个体权利，</tgt>
-5. <src>came along </src><tgt><|wait|></tgt>  -  <src>came along last, </src><tgt><|wait|></tgt>
-6. <src>last, not leading. </src><tgt><|wait|></tgt>  -  <src>not leading. </src><tgt><|wait|></tgt>
-7. <src>And I don't think the courts want to be </src><tgt><|wait|></tgt>  -  <src>And I don't I don't think the courts want to be </src><tgt><|wait|></tgt>
-8. <src><|wait|></src><tgt>是最后才介入的，不是引领者。我不认为</tgt>  -  <src>the </src><tgt>法院总是最后一个加入的。我个人认为，</tgt>
-9. <src>the the vanguard of social </src><tgt><|wait|></tgt>  -  <src>vanard of social </src><tgt><|wait|></tgt>
-10. <src>change </src><tgt><|wait|></tgt>  -  <src>change, </src><tgt><|wait|></tgt>
-11. <src>these days, </src><tgt><|wait|></tgt>  -  <src>these days. </src><tgt><|wait|></tgt>
-12. <src><|wait|></src><tgt>法院现在想成为社会变革的先锋，</tgt>  -  <src>But they rather </src><tgt>这些天似乎不想成为社会变革的典范。但他们更</tgt>
-13. <src>but they rather reflect </src><tgt><|wait|></tgt>  -  <src>reflect the </src><tgt><|wait|></tgt>
-14. <src>the consensus </src><tgt><|wait|></tgt>  -  <src>consensus. </src><tgt><|wait|></tgt>
-15. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>That's already </src><tgt><|wait|></tgt>
-16. <src>that's already emerged. </src><tgt>它们更倾向于反映已经形成的共识。</tgt>  -  <src>emerged. </src><tgt>选择反映已经形成的共识。</tgt>
-17. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>So. </src><tgt><|wait|></tgt>
-18. <src>So you have some </src><tgt><|wait|></tgt>  -  <src>You have </src><tgt><|wait|></tgt>
-19. <src>federal judges </src><tgt><|wait|></tgt>  -  <src>some federal judges </src><tgt><|wait|></tgt>
-20. <src><|wait|></src><tgt>所以，有些联邦法官……</tgt>  -  <src>who </src><tgt><|wait|></tgt>
-21. <src>who. </src><tgt><|wait|></tgt>  -  <src>who </src><tgt><|wait|></tgt>
+  | round | ground truth | predict | process time (ms) |
+  |---|---|---|---|
+  | 1 | `<src><\|wait\|></src>` | `<src>家长需要</src>` | 2310 |
+  | 2 | `<src>家长需要做的是，</src>` | `<src>做的是</src>` | 922 |
+  | 3 | `<src><\|wait\|></src>` | `<src>用我们</src>` | 1455 |
+  | 4 | `<src>用我们深深的</src>` | `<src>身上的爱胶水</src>` | 1235 |
+  | 5 | `<src>爱浇水、</src>` | `<src>是</src>` | 531 |
+  | 6 | `<src>施肥，</src>` | `<src>是</src>` | 2257 |
+  | 7 | `<src>给足</src>` | `<src>给儿子</src>` | 506 |
+  | 8 | `<src>孩子心理营养，</src>` | `<src>心里影响</src>` | 1780 |
+  | 9 | `<src><\|wait\|></src>` | `<src>给内心的</src>` | 2300 |
+  | 10 | `<src>并耐心等待孩子</src>` | `<src>孩子慢慢</src>` | 627 |
+  | 11 | `<src>慢慢长大。</src>` | `<src>长大</src>` | 2578 |
 
 ---
 
-## Test Example 32 / 60
+- UID: KO_Djg2xNdyFCU_W000010
 
-  - UID: ZH_B00041_S00155_W000028
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English.
-
-1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>家长需要</src><tgt>Parents need to</tgt>
-2. <src>家长需要做的是，</src><tgt>What parents need to do is this:</tgt>  -  <src>做的是</src><tgt>do the following:</tgt>
-3. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>用我们</src><tgt><|wait|></tgt>
-4. <src>用我们深深的</src><tgt><|wait|></tgt>  -  <src>身上的爱</src><tgt>use the love in our own hearts</tgt>
-5. <src>爱浇水、</src><tgt><|wait|></tgt>  -  <src>交世界，</src><tgt>to make love happen.</tgt>
-6. <src>施肥，</src><tgt>water and fertilize with our deep love,</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-7. <src>给足</src><tgt><|wait|></tgt>  -  <src>可以做</src><tgt><|wait|></tgt>
-8. <src>孩子心理营养，</src><tgt>give children enough psychological nourishment,</tgt>  -  <src>孩子心里的影响力。</src><tgt>That is the influence</tgt>
-9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>以内心，</src><tgt>that we want to instill in our children</tgt>
-10. <src>并耐心等待孩子</src><tgt>and wait patiently for</tgt>  -  <src>等他孩子</src><tgt><|wait|></tgt>
-11. <src>慢慢长大。</src><tgt>them to grow slowly.</tgt>  -  <src>慢慢长大。</src><tgt>as they grow up: by teaching them how to share their hearts.</tgt>
-
----
-
-## Test Example 40 / 60
-
-  - UID: JA_Xv3zO_K9SuU_W000011
-  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
-
-1. <src>そうです。</src>  -  <src>そうですね、</src>
-2. <src>そこで</src>  -  <src>そこで</src>
-3. <src><|wait|></src>  -  <src>っていう</src>
-4. <src>テキという設備寺が</src>  -  <src>設定</src>
-5. <src>ありましたね。</src>  -  <src>済みか読みましたね</src>
-6. <src>で、</src>  -  <src>って。</src>
-7. <src><|wait|></src>  -  <src><|wait|></src>
-8. <src>長井慶義氏の仕組み</src>  -  <src>細井親父の</src>
-9. <src><|wait|></src>  -  <src>仕組みは</src>
-10. <src>は五経、</src>  -  <src>元</src>
-11. <src><|wait|></src>  -  <src>設定</src>
-12. <src>設備寺、五比</src>  -  <src>済み？</src>
-13. <src>です。</src>  -  <src>合図。</src>
+  | round | ground truth | predict | process time (ms) |
+  |---|---|---|---|
+  | 1 | `<src><\|wait\|></src>` | `<src>I am </src>` | 1994 |
+  | 2 | `<src>아이 엠 애플 을 </src>` | `<src>Apple </src>` | 850 |
+  | 3 | `<src>촉발 시키고 </src>` | `<src>fruit </src>` | 1539 |
+  | 4 | `<src><\|wait\|></src>` | `<src>pick and </src>` | 1256 |
+  | 5 | `<src>자신 의 </src>` | `<src>eat </src>` | 651 |
+  | 6 | `<src><\|wait\|></src>` | `<src>your own </src>` | 2167 |
+  | 7 | `<src>부모 를 죽인 페르 나 </src>` | `<src>jogging </src>` | 944 |
+  | 8 | `<src><\|wait\|></src>` | `<src>heruna </src>` | 1432 |
+  | 9 | `<src>박한상과 </src>` | `<src>pachang </src>` | 2292 |
+  | 10 | `<src><\|wait\|></src>` | `<src>and </src>` | 638 |
+  | 11 | `<src>같은 세대 들입니다. </src>` | `<src>four generations </src>` | 2745 |
 
 ---
 
-## Test Example 48 / 60
+- UID: EN_nUuwxonVyYE_W000054
 
-  - UID: EN_n_COVPwr54I_W000006
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Korean. Keep at least 1 wait windows before each target release.
-
-1. <src>My name is </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-2. <src>Kerenath Dettig. </src><tgt>제 이름은 케레나스 데티그입니다.</tgt>  -  <src>My name is Jinah Tree,</src><tgt>제 이름은 진아 트리예요. 저는</tgt>
-3. <src>I am currently </src><tgt><|wait|></tgt>  -  <src>I am currently studying</src><tgt><|wait|></tgt>
-4. <src><|wait|></src><tgt>저는 현재</tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-5. <src>studying a Bachelor of Finance </src><tgt><|wait|></tgt>  -  <src>AABX, back roll finance, and AABX</src><tgt>AABX, 배경 투자, 그리고 AABX를 지금 공부하고 있고요.</tgt>
-6. <src>and a Bachelor of Psychology </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>of psychology, here at </src><tgt>심리학자들을 여기서</tgt>
-8. <src>here at the ANU, </src><tgt>호주국립대학교( ANU) 에서 금융학과 심리학 학사 과정을</tgt>  -  <src>Jianyu, </src><tgt><|wait|></tgt>
-9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt>Jianyu에서 배웠어요. 심리학자</tgt>
-10. <src>and in the future, I want to go into </src><tgt>밟고 있고요, 앞으로는</tgt>  -  <src>and in the future, </src><tgt><|wait|></tgt>
-11. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>I want to go into corporate consulting </src><tgt>들도요. 미래에는 기업 자문가로</tgt>
-12. <src>corporate consultancy. </src><tgt>기업 컨설팅 쪽으로 가고 싶습니다.</tgt>  -  <src>or </src><tgt><|wait|></tgt>
+  | round | ground truth | predict | process time (ms) |
+  |---|---|---|---|
+  | 1 | `<src>What is your body </src>` | `<src>What is your body </src>` | 1869 |
+  | 2 | `<src>doing? </src>` | `<src>saying? </src>` | 907 |
+  | 3 | `<src>Drop into </src>` | `<src>Drop pin to your body. </src>` | 1565 |
+  | 4 | `<src>your body. </src>` | `<src>Where does </src>` | 1186 |
+  | 5 | `<src>Where does the tension </src>` | `<src>attention start? </src>` | 1165 |
+  | 6 | `<src>start? What is it? </src>` | `<src>What is it? Is it a </src>` | 1787 |
+  | 7 | `<src>Is it a headache? </src>` | `<src>day? Cuz it's a </src>` | 1320 |
+  | 8 | `<src>Is it a tightness in your chest? </src>` | `<src>time in your chest. </src>` | 2285 |
+  | 9 | `<src>I ask them what </src>` | `<src>I have a sob. </src>` | 1311 |
+  | 10 | `<src><\|wait\|></src>` | `<src>Like which are you using? </src>` | 2634 |
+  | 11 | `<src>language are you using? </src>` | `<src>Saying. </src>` | 1337 |
 
 ---
 
-## Test Example 54 / 60
 
-  - UID: ZH_W0NbyT5Ak-A_W000071
-  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
-
-1. <src>弗洛伊德</src>  -  <src>Four in </src>
-2. <src>首次觉知到</src>  -  <src>the subject had</src>
-3. <src>那个现象：</src>  -  <src>solved that problem.</src>
-4. <src>每当我们</src>  -  <src>But we, </src>
-5. <src><|wait|></src>  -  <src>in our pursuit of </src>
-6. <src>处于爱之中，</src>  -  <src>love, we</src>
-7. <src>所谓的爱，</src>  -  <src>find</src>
-8. <src>我们也</src>  -  <src>the other love</src>
-9. <src>同时进入恨。</src>  -  <src>that has entered</src>
-10. <src><|wait|></src>  -  <src>the heart</src>
-11. <src>在早上的时候，</src>  -  <src>when we are seeking, that</src>
-12. <src>它是爱；</src>  -  <src>is that love.</src>
-13. <src>到了晚上，</src>  -  <src>The end result</src>
-14. <src>它就变成恨。</src>  -  <src>is that, it turns into</src>
-15. <src><|wait|></src>  -  <src>that</src>
-16. <src>那个钟摆</src>  -  <src>love.</src>
-17. <src><|wait|></src>  -  <src>It continues to grow</src>
-18. <src>继续在移动。</src>  -  <src>and and.</src>
-```
-
-
-#### Final Test Outputs - step 5400
-
-```text
-Test Metrics
-  - STEP: 5400
-  - TOTAL_AVAILABLE_TEST_ROWS: 60
-  - SELECTED_TEST_ROWS: 60
-  - POSTPROCESSED_TURN_STOP_RATE: 1.0000
-  - PROTOCOL_VALID_RATE: 1.0000
-  - RAW_TURN_STOP_RATE: 1.0000
-  - RECORD_COUNT: 60
-  - SRC_RELEASE_ACCURACY: 0.9610
-  - SRC_RELEASE_TOTAL: 718
-  - SRC_WAIT_ACCURACY: 0.7219
-  - SRC_WAIT_TOTAL: 151
-  - TGT_RELEASE_ACCURACY: 0.8725
-  - TGT_RELEASE_TOTAL: 298
-  - TGT_WAIT_ACCURACY: 0.8896
-  - TGT_WAIT_TOTAL: 489
-  - TURN_COUNT: 869
-
----
-
-## Test Example 2 / 60
-
-  - UID: EN_nLFyRxIRQBo_W000057
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Japanese. Tolerance window size is 2.
-
-1. <src>These people are </src><tgt><|wait|></tgt>  -  <src>These people are </src><tgt><|wait|></tgt>
-2. <src>completely rare, </src><tgt><|wait|></tgt>  -  <src>completely rare, </src><tgt><|wait|></tgt>
-3. <src>and they often </src><tgt>こうした人々は非常に稀です。そして、</tgt>  -  <src>and they often </src><tgt>これらの人々は非常に稀です。そして、</tgt>
-4. <src>show up to </src><tgt><|wait|></tgt>  -  <src>show up to </src><tgt><|wait|></tgt>
-5. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-6. <src>completely revolutionize the world. </src><tgt>世界を根本から変えるような存在であることがよくあります。</tgt>  -  <src>completely revolutionize the world. </src><tgt>世界の完全な革命を起こすためにしばしば現れます。</tgt>
-7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-8. <src>Their personality is </src><tgt><|wait|></tgt>  -  <src>Their personality is </src><tgt><|wait|></tgt>
-9. <src>something of a </src><tgt>彼らの性格は</tgt>  -  <src>something of a contradiction. </src><tgt>彼らの性格は矛盾していることも特徴です。</tgt>
-10. <src>contradiction. </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-11. <src>While they're </src><tgt><|wait|></tgt>  -  <src>While they're </src><tgt><|wait|></tgt>
-12. <src>extroverted, </src><tgt>矛盾しています。外交的である一方、</tgt>  -  <src>extroverted, </src><tgt>外向的であるだけでなく、</tgt>
-13. <src>they also hate </src><tgt><|wait|></tgt>  -  <src>they also hate </src><tgt><|wait|></tgt>
-14. <src>meaningless conversations </src><tgt><|wait|></tgt>  -  <src>meaningless conversations </src><tgt><|wait|></tgt>
-15. <src>and like to </src><tgt>無意味な会話は嫌います。そして、</tgt>  -  <src><|wait|></src><tgt>無意味な会話を嫌い、</tgt>
-16. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>and like to get straight to </src><tgt><|wait|></tgt>
-17. <src>get straight to the point. </src><tgt><|wait|></tgt>  -  <src>the point. </src><tgt><|wait|></tgt>
-18. <src>They also love to </src><tgt>要点を突くのを好みます。また、</tgt>  -  <src>They also love to </src><tgt>すぐ本題に入りたいと考えます。また、</tgt>
-19. <src>play </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-20. <src>the devil's advocate, and they </src><tgt><|wait|></tgt>  -  <src>play the devil's advocate, </src><tgt><|wait|></tgt>
-21. <src><|wait|></src><tgt>あえて悪魔の代弁者を演じることを好み、</tgt>  -  <src><|wait|></src><tgt>悪魔の代弁をするのも好きです。</tgt>
-22. <src>never shy away from a debate. </src><tgt><|wait|></tgt>  -  <src>and they're never shy over a debate. </src><tgt><|wait|></tgt>
-23. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-24. <src><|wait|></src><tgt>議論を避けることはありません。</tgt>  -  <src>ENTP stands for </src><tgt>そして議論が始まっても決して臆しません。ENTPとは、</tgt>
-25. <src>ENTP stands for </src><tgt><|wait|></tgt>  -  <src>Extraverted, Intuitive, \, </src><tgt><|wait|></tgt>
-
----
-
-## Test Example 9 / 60
-
-  - UID: EN_nSOXneMb4Ec_W000365
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Keep at least 3 wait windows before each target release.
-
-1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-2. <src>Meaningful individual </src><tgt><|wait|></tgt>  -  <src>Meaningful, </src><tgt><|wait|></tgt>
-3. <src>right, </src><tgt><|wait|></tgt>  -  <src>individual write, </src><tgt><|wait|></tgt>
-4. <src>and the Supreme Court </src><tgt>有意义的个人权利，而最高法院</tgt>  -  <src>and the Supreme Court </src><tgt>有意义的个人著作，最高法院</tgt>
-5. <src>came along </src><tgt><|wait|></tgt>  -  <src>came along </src><tgt><|wait|></tgt>
-6. <src>last, not leading. </src><tgt><|wait|></tgt>  -  <src>last, not leading. </src><tgt><|wait|></tgt>
-7. <src>And I don't think the courts want to be </src><tgt><|wait|></tgt>  -  <src>And I don't think the courts want to be </src><tgt><|wait|></tgt>
-8. <src><|wait|></src><tgt>是最后才介入的，不是引领者。我不认为</tgt>  -  <src><|wait|></src><tgt>最后才跟进。我认为法院不想</tgt>
-9. <src>the the vanguard of social </src><tgt><|wait|></tgt>  -  <src>the the vanguard of social </src><tgt><|wait|></tgt>
-10. <src>change </src><tgt><|wait|></tgt>  -  <src>change </src><tgt><|wait|></tgt>
-11. <src>these days, </src><tgt><|wait|></tgt>  -  <src>these days. </src><tgt><|wait|></tgt>
-12. <src><|wait|></src><tgt>法院现在想成为社会变革的先锋，</tgt>  -  <src>But they rather </src><tgt>成为社会变革的前沿阵线。</tgt>
-13. <src>but they rather reflect </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-14. <src>the consensus </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-15. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>reflect the consensus </src><tgt><|wait|></tgt>
-16. <src>that's already emerged. </src><tgt>它们更倾向于反映已经形成的共识。</tgt>  -  <src>that's already emerged. </src><tgt>但它们更多是反映已经形成的共识。</tgt>
-17. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>So, </src><tgt><|wait|></tgt>
-18. <src>So you have some </src><tgt><|wait|></tgt>  -  <src>you have </src><tgt><|wait|></tgt>
-19. <src>federal judges </src><tgt><|wait|></tgt>  -  <src>some federal judges </src><tgt><|wait|></tgt>
-20. <src><|wait|></src><tgt>所以，有些联邦法官……</tgt>  -  <src>who </src><tgt>所以，你们有了一些联邦法官，</tgt>
-21. <src>who. </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-
----
-
-## Test Example 32 / 60
-
-  - UID: ZH_B00041_S00155_W000028
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English.
-
-1. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>家长需要</src><tgt>Parents need to</tgt>
-2. <src>家长需要做的是，</src><tgt>What parents need to do is this:</tgt>  -  <src>做的是</src><tgt><|wait|></tgt>
-3. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-4. <src>用我们深深的</src><tgt><|wait|></tgt>  -  <src>用我们深深的</src><tgt><|wait|></tgt>
-5. <src>爱浇水、</src><tgt><|wait|></tgt>  -  <src>爱浇水、</src><tgt>show their love for the child, like watering a plant,</tgt>
-6. <src>施肥，</src><tgt>water and fertilize with our deep love,</tgt>  -  <src>施肥，</src><tgt>fertilizing it,</tgt>
-7. <src>给足</src><tgt><|wait|></tgt>  -  <src>给足</src><tgt><|wait|></tgt>
-8. <src>孩子心理营养，</src><tgt>give children enough psychological nourishment,</tgt>  -  <src>孩子心理营养，</src><tgt>and giving them enough emotional nourishment.</tgt>
-9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src>并耐心</src><tgt><|wait|></tgt>
-10. <src>并耐心等待孩子</src><tgt>and wait patiently for</tgt>  -  <src>等他</src><tgt><|wait|></tgt>
-11. <src>慢慢长大。</src><tgt>them to grow slowly.</tgt>  -  <src>慢慢长大。</src><tgt>And patiently waiting as they grow up.</tgt>
-
----
-
-## Test Example 40 / 60
-
-  - UID: JA_Xv3zO_K9SuU_W000011
-  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
-
-1. <src>そうです。</src>  -  <src>そうです。</src>
-2. <src>そこで</src>  -  <src>そこで</src>
-3. <src><|wait|></src>  -  <src><|wait|></src>
-4. <src>テキという設備寺が</src>  -  <src>テキという設備寺が</src>
-5. <src>ありましたね。</src>  -  <src>ありましたね。</src>
-6. <src>で、</src>  -  <src>で、</src>
-7. <src><|wait|></src>  -  <src><|wait|></src>
-8. <src>長井慶義氏の仕組み</src>  -  <src>長井慶義氏の仕組み</src>
-9. <src><|wait|></src>  -  <src><|wait|></src>
-10. <src>は五経、</src>  -  <src>は五個</src>
-11. <src><|wait|></src>  -  <src><|wait|></src>
-12. <src>設備寺、五比</src>  -  <src>設備寺五個</src>
-13. <src>です。</src>  -  <src>です。</src>
-
----
-
-## Test Example 48 / 60
-
-  - UID: EN_n_COVPwr54I_W000006
-  - SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Korean. Keep at least 1 wait windows before each target release.
-
-1. <src>My name is </src><tgt><|wait|></tgt>  -  <src>My name is </src><tgt><|wait|></tgt>
-2. <src>Kerenath Dettig. </src><tgt>제 이름은 케레나스 데티그입니다.</tgt>  -  <src>Kerenath Dettig. </src><tgt>제 이름은 케레나스 데티그( Kerenath Dettig) 입니다.</tgt>
-3. <src>I am currently </src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-4. <src><|wait|></src><tgt>저는 현재</tgt>  -  <src>I am currently studying </src><tgt>현재</tgt>
-5. <src>studying a Bachelor of Finance </src><tgt><|wait|></tgt>  -  <src>a Bachelor of Finance </src><tgt><|wait|></tgt>
-6. <src>and a Bachelor of Psychology </src><tgt><|wait|></tgt>  -  <src>and a Bachelor of Psychology </src><tgt>경영학 학사 학위와</tgt>
-7. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-8. <src>here at the ANU, </src><tgt>호주국립대학교( ANU) 에서 금융학과 심리학 학사 과정을</tgt>  -  <src>here at the ANU, </src><tgt>심리학 학사 학위를 안데번 대학교( ANU ) 에서</tgt>
-9. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-10. <src>and in the future, I want to go into </src><tgt>밟고 있고요, 앞으로는</tgt>  -  <src>and in the future, I want to go into </src><tgt>수강 중이고요, 나중에는</tgt>
-11. <src><|wait|></src><tgt><|wait|></tgt>  -  <src><|wait|></src><tgt><|wait|></tgt>
-12. <src>corporate consultancy. </src><tgt>기업 컨설팅 쪽으로 가고 싶습니다.</tgt>  -  <src>corporate consultancy. </src><tgt>기업 컨설팅 분야로 진출하고 싶습니다.</tgt>
-
----
-
-## Test Example 54 / 60
-
-  - UID: ZH_W0NbyT5Ak-A_W000071
-  - SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
-
-1. <src>弗洛伊德</src>  -  <src>弗洛伊德</src>
-2. <src>首次觉知到</src>  -  <src>首次觉知到</src>
-3. <src>那个现象：</src>  -  <src>那个现象。</src>
-4. <src>每当我们</src>  -  <src>美登们</src>
-5. <src><|wait|></src>  -  <src><|wait|></src>
-6. <src>处于爱之中，</src>  -  <src>处于爱之中，</src>
-7. <src>所谓的爱，</src>  -  <src>所谓的爱，</src>
-8. <src>我们也</src>  -  <src><|wait|></src>
-9. <src>同时进入恨。</src>  -  <src>我们也同时进入黑暗，</src>
-10. <src><|wait|></src>  -  <src><|wait|></src>
-11. <src>在早上的时候，</src>  -  <src>在早上的时候，</src>
-12. <src>它是爱；</src>  -  <src>他是爱。</src>
-13. <src>到了晚上，</src>  -  <src>到了晚上，</src>
-14. <src>它就变成恨。</src>  -  <src>他就变成</src>
-15. <src><|wait|></src>  -  <src>黑暗，</src>
-16. <src>那个钟摆</src>  -  <src>那个钟表。</src>
-17. <src><|wait|></src>  -  <src><|wait|></src>
-18. <src>继续在移动。</src>  -  <src>继续在移动。</src>
-```
+> Under edit...

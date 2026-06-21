@@ -1,0 +1,1662 @@
+{
+  "generated_at": "2026-06-21T14:02:02.250432+00:00",
+  "model_name": "gemma-4-E2B-it-lora",
+  "base_url": "http://127.0.0.1:18000/v1",
+  "concurrency": 90,
+  "constrained_decoding": false,
+  "splits": [
+    "test"
+  ],
+  "split_ratio": [
+    0.8975,
+    0.1,
+    0.0025
+  ],
+  "total_samples": null,
+  "max_window_size": -1,
+  "test_record_count": -1,
+  "audio_message_format": "input_audio",
+  "max_tokens": 256,
+  "temperature": 0,
+  "top_p": null,
+  "extra_body": null,
+  "condition": {
+    "mode": "fixed_window",
+    "requested_window": 1,
+    "requested_window_label": 1
+  },
+  "total_available_test_rows": 60,
+  "selected_test_rows": 60,
+  "test_metrics": {
+    "record_count": 60,
+    "turn_count": 869,
+    "protocol_adherence_rate": 1.0,
+    "src_wait_accuracy": 0.543046357615894,
+    "tgt_wait_accuracy": 1.0,
+    "src_release_accuracy": 0.9178272980501393,
+    "tgt_release_accuracy": 1.0,
+    "src_wait_total": 151,
+    "tgt_wait_total": 98,
+    "src_release_total": 718,
+    "tgt_release_total": 88,
+    "target_metrics_included_record_count": 13,
+    "target_metrics_filtered_record_count": 47,
+    "target_metrics_filtered_turn_count": 683,
+    "process_time_ms_count": 869,
+    "process_time_ms_total": 1199307.571,
+    "process_time_ms_avg": 1380.101,
+    "process_time_ms_p50": 1409.241,
+    "process_time_ms_p95": 2126.091,
+    "process_time_ms_max": 3213.638
+  },
+  "process_time_ms_by_record": [
+    {
+      "uid": "ZH_3X_Q9-mIhJI_W000026",
+      "split": "test",
+      "turn_process_time_ms": [
+        1136.033,
+        771.008,
+        1200.245,
+        1755.918,
+        1489.745,
+        1495.524,
+        1479.856,
+        1084.212,
+        1805.336,
+        1910.502,
+        440.296
+      ]
+    },
+    {
+      "uid": "KO_Djg2xNdyFCU_W000010",
+      "split": "test",
+      "turn_process_time_ms": [
+        907.291,
+        843.95,
+        1868.972,
+        953.86,
+        1424.742,
+        1519.759,
+        1662.728,
+        897.318,
+        1910.442,
+        1947.033,
+        514.476
+      ]
+    },
+    {
+      "uid": "ZH_B00041_S00155_W000028",
+      "split": "test",
+      "turn_process_time_ms": [
+        1152.156,
+        1229.541,
+        1233.619,
+        1114.771,
+        1510.666,
+        1531.837,
+        1471.313,
+        1101.306,
+        1886.636,
+        2052.493,
+        1272.762
+      ]
+    },
+    {
+      "uid": "ZH_W0NbyT5Ak-A_W000046",
+      "split": "test",
+      "turn_process_time_ms": [
+        1114.456,
+        1216.672,
+        1158.492,
+        1079.277,
+        1448.08,
+        1254.273,
+        793.427,
+        2141.282,
+        1890.633,
+        2049.331,
+        1326.31
+      ]
+    },
+    {
+      "uid": "EN_B00016_S00042_W000165",
+      "split": "test",
+      "turn_process_time_ms": [
+        966.961,
+        761.612,
+        1468.024,
+        2101.622,
+        943.062,
+        1593.568,
+        1987.637,
+        1806.049,
+        458.543,
+        1978.384,
+        1545.321
+      ]
+    },
+    {
+      "uid": "KO_B00002_S08662_W000000",
+      "split": "test",
+      "turn_process_time_ms": [
+        1276.949,
+        942.21,
+        1426.057,
+        1754.408,
+        1062.41,
+        1691.198,
+        1946.076,
+        1751.705,
+        535.684,
+        2057.826,
+        1738.542
+      ]
+    },
+    {
+      "uid": "KO_B00001_S08422_W000000",
+      "split": "test",
+      "turn_process_time_ms": [
+        968.227,
+        1003.609,
+        1509.046,
+        1539.146,
+        1289.236,
+        1615.138,
+        2019.094,
+        494.19,
+        1742.973,
+        2121.461,
+        1882.655
+      ]
+    },
+    {
+      "uid": "JA_A7kJ7PmPk8g_W000017",
+      "split": "test",
+      "turn_process_time_ms": [
+        774.293,
+        854.899,
+        1355.163,
+        1470.594,
+        1449.643,
+        1494.185,
+        1513.529,
+        952.016,
+        2015.753,
+        2210.028,
+        2003.78
+      ]
+    },
+    {
+      "uid": "ZH_B00021_S00118_W000006",
+      "split": "test",
+      "turn_process_time_ms": [
+        1138.438,
+        1445.652,
+        1437.961,
+        1729.072,
+        783.487,
+        1409.241,
+        1820.966,
+        682.558,
+        1724.271,
+        2205.24,
+        2322.744
+      ]
+    },
+    {
+      "uid": "KO_B00003_S00166_W000000",
+      "split": "test",
+      "turn_process_time_ms": [
+        963.697,
+        1041.325,
+        2030.053,
+        2017.792,
+        1217.39,
+        1575.583,
+        1199.645,
+        2086.683,
+        1977.482,
+        1412.347,
+        1887.626
+      ]
+    },
+    {
+      "uid": "ZH_B00041_S00105_W000084",
+      "split": "test",
+      "turn_process_time_ms": [
+        768.566,
+        1146.818,
+        1870.364,
+        1559.531,
+        907.171,
+        1608.001,
+        1931.579,
+        1607.979,
+        624.544,
+        1893.376,
+        1230.857,
+        2115.069
+      ]
+    },
+    {
+      "uid": "JA_Xv3zO_K9SuU_W000011",
+      "split": "test",
+      "turn_process_time_ms": [
+        860.036,
+        856.642,
+        1119.923,
+        1531.018,
+        1386.431,
+        732.2,
+        1348.668,
+        2108.075,
+        1826.715,
+        390.3,
+        1922.126,
+        1496.433,
+        1935.701
+      ]
+    },
+    {
+      "uid": "EN_nUuwxonVyYE_W000054",
+      "split": "test",
+      "turn_process_time_ms": [
+        852.727,
+        882.517,
+        1478.386,
+        1215.383,
+        1513.174,
+        1789.905,
+        1996.328,
+        2136.636,
+        2020.774,
+        1558.583,
+        1904.972
+      ]
+    },
+    {
+      "uid": "EN_B00016_S00472_W000046",
+      "split": "test",
+      "turn_process_time_ms": [
+        1207.074,
+        899.325,
+        1709.497,
+        1165.88,
+        1314.05,
+        1468.758,
+        1439.168,
+        951.736,
+        1840.024,
+        577.722,
+        1843.18,
+        1584.693,
+        1847.855
+      ]
+    },
+    {
+      "uid": "ZH_P0j1n-htgFu_W000014",
+      "split": "test",
+      "turn_process_time_ms": [
+        1002.808,
+        1012.117,
+        1370.295,
+        2483.409,
+        1203.078,
+        1268.041,
+        1579.306,
+        2182.58,
+        2056.391,
+        1604.764,
+        1800.945
+      ]
+    },
+    {
+      "uid": "JA_48elNGI2sVo_W000267",
+      "split": "test",
+      "turn_process_time_ms": [
+        1097.558,
+        908.707,
+        1357.985,
+        1563.178,
+        1349.042,
+        1680.68,
+        1735.025,
+        797.86,
+        1765.272,
+        2097.468,
+        1594.684,
+        1893.3
+      ]
+    },
+    {
+      "uid": "JA_7sVJ5Fmygak_W000022",
+      "split": "test",
+      "turn_process_time_ms": [
+        857.595,
+        1355.608,
+        1417.114,
+        1055.085,
+        1416.928,
+        1549.99,
+        1778.655,
+        966.03,
+        1699.132,
+        2150.315,
+        2084.23,
+        1669.485
+      ]
+    },
+    {
+      "uid": "JA_B00001_S00577_W000003",
+      "split": "test",
+      "turn_process_time_ms": [
+        1045.268,
+        1004.808,
+        1516.977,
+        1216.364,
+        1506.555,
+        1615.694,
+        1804.806,
+        662.119,
+        1813.802,
+        2214.951,
+        1938.788,
+        1858.737
+      ]
+    },
+    {
+      "uid": "ZH_P3DbOZsH800_W000034",
+      "split": "test",
+      "turn_process_time_ms": [
+        935.529,
+        864.84,
+        1468.203,
+        1265.153,
+        1415.87,
+        1705.66,
+        1430.982,
+        892.738,
+        1934.896,
+        1885.186,
+        485.561,
+        2483.331,
+        1278.092
+      ]
+    },
+    {
+      "uid": "EN_nOtTM2Tg_DY_W000004",
+      "split": "test",
+      "turn_process_time_ms": [
+        1157.381,
+        816.597,
+        1254.99,
+        1518.033,
+        1540.477,
+        1768.594,
+        2091.25,
+        2079.969,
+        2244.36,
+        2114.397,
+        1707.673
+      ]
+    },
+    {
+      "uid": "JA_6YxG4VtOq3M_W000012",
+      "split": "test",
+      "turn_process_time_ms": [
+        1292.071,
+        824.682,
+        1814.207,
+        1708.922,
+        903.29,
+        1828.796,
+        1832.821,
+        1616.961,
+        608.373,
+        2008.535,
+        1852.836,
+        2181.695
+      ]
+    },
+    {
+      "uid": "EN_n_COVPwr54I_W000006",
+      "split": "test",
+      "turn_process_time_ms": [
+        949.075,
+        1241.406,
+        1485.868,
+        918.47,
+        1551.991,
+        1862.759,
+        1924.569,
+        1991.16,
+        594.263,
+        1890.478,
+        2332.237,
+        1480.706
+      ]
+    },
+    {
+      "uid": "ZH_ShY5gaBM9MI_W000028",
+      "split": "test",
+      "turn_process_time_ms": [
+        703.045,
+        864.208,
+        1159.937,
+        2153.291,
+        1117.202,
+        1734.915,
+        1982.55,
+        2124.954,
+        1949.643,
+        454.992,
+        2639.643,
+        1213.071
+      ]
+    },
+    {
+      "uid": "EN_B00016_S01082_W000024",
+      "split": "test",
+      "turn_process_time_ms": [
+        960.678,
+        1135.36,
+        1490.787,
+        1979.534,
+        858.534,
+        1489.16,
+        1934.204,
+        2192.2,
+        1915.079,
+        1309.957,
+        1817.697,
+        1147.199
+      ]
+    },
+    {
+      "uid": "KO_GSM-N2PFBuE_W000022",
+      "split": "test",
+      "turn_process_time_ms": [
+        938.333,
+        1588.546,
+        1326.497,
+        2098.659,
+        1297.409,
+        1279.27,
+        1494.205,
+        2084.697,
+        2217.697,
+        3213.638,
+        881.717
+      ]
+    },
+    {
+      "uid": "ZH_RuIL-xmPqIY_W000179",
+      "split": "test",
+      "turn_process_time_ms": [
+        1067.938,
+        807.826,
+        1258.235,
+        1427.366,
+        1458.575,
+        1094.142,
+        913.243,
+        1941.949,
+        901.369,
+        1383.109,
+        1927.033,
+        1469.108,
+        1984.236,
+        1204.489
+      ]
+    },
+    {
+      "uid": "JA_055Z9Ti9z9Y_W000045",
+      "split": "test",
+      "turn_process_time_ms": [
+        1111.677,
+        776.978,
+        1188.129,
+        2103.932,
+        1242.5,
+        1722.47,
+        1951.103,
+        581.76,
+        1702.973,
+        2039.118,
+        1568.613,
+        1880.354,
+        1206.797
+      ]
+    },
+    {
+      "uid": "KO_E5GX5U4qdXY_W000004",
+      "split": "test",
+      "turn_process_time_ms": [
+        975.389,
+        1542.766,
+        1449.059,
+        1245.557,
+        1009.216,
+        1556.183,
+        1823.083,
+        625.714,
+        1795.129,
+        2161.99,
+        2071.593,
+        1849.029,
+        1170.799
+      ]
+    },
+    {
+      "uid": "EN_nd3VSjWd148_W000003",
+      "split": "test",
+      "turn_process_time_ms": [
+        1261.216,
+        1003.509,
+        1361.576,
+        1659.663,
+        1171.025,
+        1522.914,
+        1735.586,
+        734.475,
+        1877.898,
+        2176.769,
+        2085.986,
+        1885.92,
+        1152.504
+      ]
+    },
+    {
+      "uid": "ZH_ShY5gaBM9MI_W000011",
+      "split": "test",
+      "turn_process_time_ms": [
+        993.852,
+        1414.516,
+        1554.933,
+        1147.946,
+        1205.417,
+        1654.486,
+        2041.272,
+        2050.008,
+        2126.091,
+        1728.719,
+        1752.591,
+        924.867,
+        886.743
+      ]
+    },
+    {
+      "uid": "EN_B00016_S01462_W000036",
+      "split": "test",
+      "turn_process_time_ms": [
+        1084.397,
+        802.056,
+        1420.137,
+        1995.442,
+        1009.154,
+        1642.819,
+        1985.641,
+        2266.273,
+        1930.511,
+        1497.034,
+        1926.815,
+        1539.712,
+        531.676
+      ]
+    },
+    {
+      "uid": "ZH_UJBZXO0vtl8_W000131",
+      "split": "test",
+      "turn_process_time_ms": [
+        782.73,
+        985.563,
+        1469.614,
+        1535.988,
+        1295.611,
+        1422.441,
+        1764.657,
+        731.64,
+        1905.199,
+        2190.833,
+        1985.889,
+        1810.05,
+        1182.717,
+        1187.338
+      ]
+    },
+    {
+      "uid": "KO_GFCl_rbj8jM_W000001",
+      "split": "test",
+      "turn_process_time_ms": [
+        754.371,
+        854.997,
+        1128.698,
+        1530.968,
+        1492.518,
+        1333.279,
+        874.681,
+        2015.495,
+        1892.03,
+        2065.857,
+        1275.961,
+        2129.524,
+        773.34,
+        1174.29,
+        1083.883
+      ]
+    },
+    {
+      "uid": "EN_ndiOC6coCI0_W000005",
+      "split": "test",
+      "turn_process_time_ms": [
+        967.872,
+        905.686,
+        1430.037,
+        1382.581,
+        1411.421,
+        1579.573,
+        1445.402,
+        940.815,
+        1907.035,
+        2071.841,
+        1173.172,
+        1664.765,
+        1188.649,
+        1380.007,
+        1224.692
+      ]
+    },
+    {
+      "uid": "EN_nOtTM2Tg_DY_W000001",
+      "split": "test",
+      "turn_process_time_ms": [
+        1205.845,
+        738.089,
+        1291.161,
+        1531.538,
+        1547.671,
+        1348.508,
+        1112.038,
+        1538.191,
+        1969.787,
+        2045.23,
+        1683.054,
+        2115.502,
+        1168.296,
+        1059.287,
+        650.903
+      ]
+    },
+    {
+      "uid": "ZH_UJBZXO0vtl8_W000084",
+      "split": "test",
+      "turn_process_time_ms": [
+        994.884,
+        782.367,
+        1665.251,
+        2007.075,
+        857.724,
+        1507.971,
+        2014.29,
+        2169.321,
+        1959.618,
+        1606.785,
+        1891.683,
+        916.916,
+        886.326,
+        1487.077
+      ]
+    },
+    {
+      "uid": "KO_B00002_S01182_W000002",
+      "split": "test",
+      "turn_process_time_ms": [
+        936.338,
+        1729.648,
+        1480.965,
+        1521.522,
+        740.161,
+        1430.422,
+        1989.219,
+        2001.527,
+        679.632,
+        1618.239,
+        1733.187,
+        2017.138,
+        1167.985,
+        1235.859,
+        586.561
+      ]
+    },
+    {
+      "uid": "KO_ErZ6Q3-uZb8_W000007",
+      "split": "test",
+      "turn_process_time_ms": [
+        1093.355,
+        972.022,
+        1825.729,
+        1157.688,
+        1402.726,
+        1549.587,
+        1971.907,
+        523.729,
+        1794.957,
+        1931.443,
+        1105.352,
+        1623.395,
+        1243.618,
+        1134.027,
+        786.346,
+        1152.113
+      ]
+    },
+    {
+      "uid": "KO_B00001_S08942_W000000",
+      "split": "test",
+      "turn_process_time_ms": [
+        885.48,
+        1793.381,
+        1618.299,
+        1737.778,
+        1563.364,
+        2162.826,
+        2092.508,
+        2042.587,
+        1602.244,
+        2332.688,
+        1169.902,
+        1357.003,
+        1101.249
+      ]
+    },
+    {
+      "uid": "EN_nkR1jtzhDFY_W000034",
+      "split": "test",
+      "turn_process_time_ms": [
+        1090.994,
+        901.682,
+        1566.358,
+        1081.747,
+        1447.929,
+        1907.35,
+        2047.154,
+        1766.564,
+        693.811,
+        1964.444,
+        2270.284,
+        2005.427,
+        821.312,
+        1628.872,
+        676.386
+      ]
+    },
+    {
+      "uid": "JA_1u7y1Gam6ly_W000002",
+      "split": "test",
+      "turn_process_time_ms": [
+        1049.901,
+        1415.074,
+        1547.796,
+        1151.451,
+        1070.246,
+        1517.024,
+        1785.935,
+        782.845,
+        1822.416,
+        2190.751,
+        1813.005,
+        1804.964,
+        1239.296,
+        629.449,
+        1038.472,
+        966.759
+      ]
+    },
+    {
+      "uid": "ZH_P0j1n-htgFu_W000028",
+      "split": "test",
+      "turn_process_time_ms": [
+        1056.075,
+        1518.941,
+        1445.364,
+        1919.595,
+        1060.448,
+        788.91,
+        2122.541,
+        2027.007,
+        1125.196,
+        1364.368,
+        2299.032,
+        1389.204,
+        1268.912,
+        1441.626,
+        903.336
+      ]
+    },
+    {
+      "uid": "KO_EtpixiKDUjA_W000104",
+      "split": "test",
+      "turn_process_time_ms": [
+        1167.151,
+        952.864,
+        1816.304,
+        1936.787,
+        904.032,
+        1485.982,
+        1973.288,
+        2103.651,
+        1932.84,
+        1339.281,
+        1931.714,
+        990.413,
+        1163.416,
+        1380.871,
+        929.041
+      ]
+    },
+    {
+      "uid": "KO_EyI5xeRFbyu_W000022",
+      "split": "test",
+      "turn_process_time_ms": [
+        1178.745,
+        692.276,
+        2333.2,
+        1423.676,
+        777.154,
+        1841.03,
+        1662.852,
+        1733.315,
+        704.281,
+        1847.952,
+        2098.719,
+        1639.809,
+        1192.235,
+        1271.758,
+        1047.847,
+        624.848
+      ]
+    },
+    {
+      "uid": "ZH_B00021_S03098_W000013",
+      "split": "test",
+      "turn_process_time_ms": [
+        1175.858,
+        948.19,
+        1429.443,
+        2475.5,
+        991.589,
+        944.486,
+        1822.875,
+        622.264,
+        1812.046,
+        2070.234,
+        1487.968,
+        2031.21,
+        1040.66,
+        765.27,
+        1193.541,
+        958.643,
+        696.28
+      ]
+    },
+    {
+      "uid": "JA_Y8_nzz_wKN8_W000016",
+      "split": "test",
+      "turn_process_time_ms": [
+        1173.309,
+        1205.224,
+        1549.741,
+        1258.571,
+        1252.044,
+        1950.671,
+        1873.802,
+        1955.81,
+        1958.949,
+        1535.0,
+        1903.092,
+        1096.685,
+        816.228,
+        1277.616,
+        1027.186,
+        707.664
+      ]
+    },
+    {
+      "uid": "KO_B00002_S00012_W000001",
+      "split": "test",
+      "turn_process_time_ms": [
+        1136.811,
+        852.56,
+        1313.364,
+        1531.515,
+        1456.732,
+        1610.429,
+        1798.678,
+        764.175,
+        1927.845,
+        2136.622,
+        2392.372,
+        1292.656,
+        1215.57,
+        1467.368,
+        995.496,
+        780.522
+      ]
+    },
+    {
+      "uid": "JA_4wtcjSQrmjg_W000022",
+      "split": "test",
+      "turn_process_time_ms": [
+        1135.067,
+        1422.792,
+        1187.699,
+        985.625,
+        1488.51,
+        1428.952,
+        1144.007,
+        1375.86,
+        2029.687,
+        2200.359,
+        1707.671,
+        2116.859,
+        1265.057,
+        1348.074,
+        995.44,
+        803.474
+      ]
+    },
+    {
+      "uid": "KO_EBFCgXs9SPQ_W000037",
+      "split": "test",
+      "turn_process_time_ms": [
+        855.517,
+        1147.098,
+        1732.634,
+        712.642,
+        1681.666,
+        1726.974,
+        1904.315,
+        2081.319,
+        2130.066,
+        1868.225,
+        1790.243,
+        1386.056,
+        1212.586,
+        976.58,
+        656.182,
+        579.71
+      ]
+    },
+    {
+      "uid": "KO_Dl3QxRTDLhU_W000081",
+      "split": "test",
+      "turn_process_time_ms": [
+        1067.888,
+        856.841,
+        1414.332,
+        1564.579,
+        1423.571,
+        2126.175,
+        1762.534,
+        2051.872,
+        1977.726,
+        1676.78,
+        1846.037,
+        1127.03,
+        687.007,
+        1419.289,
+        903.527,
+        910.849
+      ]
+    },
+    {
+      "uid": "EN_oVINouZo8aQ_W000138",
+      "split": "test",
+      "turn_process_time_ms": [
+        1046.596,
+        812.202,
+        1633.919,
+        1189.367,
+        1446.793,
+        1467.229,
+        1322.576,
+        1124.623,
+        1962.932,
+        903.323,
+        1447.474,
+        2580.124,
+        1272.341,
+        1370.585,
+        1197.254,
+        1291.369,
+        646.437,
+        523.218
+      ]
+    },
+    {
+      "uid": "EN_nUk3lH51lD8_W000039",
+      "split": "test",
+      "turn_process_time_ms": [
+        1013.896,
+        1096.154,
+        1975.641,
+        1585.368,
+        903.971,
+        1346.102,
+        2061.388,
+        2176.009,
+        2093.658,
+        1917.938,
+        1949.312,
+        1278.689,
+        1173.519,
+        1106.865,
+        787.002,
+        768.895
+      ]
+    },
+    {
+      "uid": "ZH_W0NbyT5Ak-A_W000071",
+      "split": "test",
+      "turn_process_time_ms": [
+        899.203,
+        944.589,
+        1812.685,
+        927.711,
+        1453.572,
+        1506.969,
+        1767.604,
+        694.81,
+        1977.135,
+        2125.393,
+        2173.901,
+        1697.003,
+        1200.001,
+        1310.138,
+        983.047,
+        788.192,
+        461.877,
+        348.915
+      ]
+    },
+    {
+      "uid": "EN_nSOXneMb4Ec_W000365",
+      "split": "test",
+      "turn_process_time_ms": [
+        1177.695,
+        873.131,
+        1155.008,
+        1569.7,
+        1427.876,
+        1531.64,
+        1783.169,
+        912.216,
+        1902.888,
+        2045.475,
+        1252.576,
+        1738.785,
+        973.014,
+        1200.834,
+        1165.961,
+        958.438,
+        419.335,
+        665.185,
+        483.944,
+        342.306,
+        464.84
+      ]
+    },
+    {
+      "uid": "EN_nUk3lH51lD8_W000079",
+      "split": "test",
+      "turn_process_time_ms": [
+        1346.121,
+        712.109,
+        1257.368,
+        1564.942,
+        1450.801,
+        1452.063,
+        1119.667,
+        1420.693,
+        1916.266,
+        2020.614,
+        473.053,
+        3113.969,
+        1003.871,
+        830.534,
+        1189.441,
+        1161.013,
+        896.379,
+        623.467,
+        508.476
+      ]
+    },
+    {
+      "uid": "EN_nlSouryhO2c_W000065",
+      "split": "test",
+      "turn_process_time_ms": [
+        951.114,
+        1069.35,
+        1371.729,
+        1518.048,
+        1240.576,
+        1541.738,
+        2129.61,
+        2178.088,
+        1851.392,
+        2095.759,
+        1750.949,
+        1336.084,
+        1209.721,
+        974.28,
+        518.134,
+        759.143,
+        555.677,
+        562.669
+      ]
+    },
+    {
+      "uid": "ZH_UJBZXO0vtl8_W000079",
+      "split": "test",
+      "turn_process_time_ms": [
+        1001.179,
+        1239.583,
+        1374.454,
+        1103.273,
+        1374.541,
+        1435.949,
+        1253.028,
+        1251.393,
+        1946.939,
+        656.898,
+        1667.077,
+        2833.532,
+        995.541,
+        1159.417,
+        1194.518,
+        911.437,
+        598.032,
+        835.584,
+        443.505,
+        533.418,
+        324.689
+      ]
+    },
+    {
+      "uid": "EN_nLFyRxIRQBo_W000057",
+      "split": "test",
+      "turn_process_time_ms": [
+        933.224,
+        1004.037,
+        1509.432,
+        983.588,
+        1426.618,
+        1491.874,
+        1149.397,
+        1518.732,
+        1956.731,
+        1977.082,
+        1542.914,
+        1989.02,
+        972.864,
+        934.389,
+        1224.869,
+        1005.841,
+        912.577,
+        611.508,
+        506.871,
+        398.77,
+        297.242,
+        355.726,
+        314.223,
+        347.524,
+        334.043
+      ]
+    },
+    {
+      "uid": "KO_EAuwJ72nbgM_W000050",
+      "split": "test",
+      "turn_process_time_ms": [
+        1254.928,
+        1158.742,
+        1540.956,
+        1626.725,
+        899.637,
+        1715.782,
+        1878.987,
+        1977.075,
+        2059.863,
+        1772.637,
+        1812.855,
+        1629.636,
+        1247.112,
+        1075.062,
+        745.557,
+        521.855,
+        302.661,
+        481.208,
+        343.861,
+        385.796,
+        279.321,
+        377.64,
+        338.282,
+        401.121,
+        251.772
+      ]
+    },
+    {
+      "uid": "JA_0WSDjPceAxQ_W000016",
+      "split": "test",
+      "turn_process_time_ms": [
+        1044.386,
+        889.577,
+        1639.459,
+        1653.002,
+        1211.528,
+        1645.141,
+        1948.738,
+        1514.533,
+        743.412,
+        2043.077,
+        1703.151,
+        1949.741,
+        1260.143,
+        967.913,
+        767.211,
+        1480.64,
+        382.443,
+        528.14,
+        524.428,
+        366.364,
+        328.734,
+        368.253,
+        339.355,
+        377.348,
+        333.242,
+        251.779,
+        207.728,
+        205.469,
+        199.852
+      ]
+    }
+  ],
+  "target_metrics_filtered_records": [
+    {
+      "uid": "ZH_3X_Q9-mIhJI_W000026",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "KO_Djg2xNdyFCU_W000010",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 8,
+      "reason": "max_empty_window=8 > requested_window=1"
+    },
+    {
+      "uid": "ZH_B00041_S00155_W000028",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "ZH_W0NbyT5Ak-A_W000046",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "EN_B00016_S00042_W000165",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "KO_B00002_S08662_W000000",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 7,
+      "reason": "max_empty_window=7 > requested_window=1"
+    },
+    {
+      "uid": "KO_B00001_S08422_W000000",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "JA_A7kJ7PmPk8g_W000017",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "KO_B00003_S00166_W000000",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "ZH_B00041_S00105_W000084",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 4,
+      "reason": "max_empty_window=4 > requested_window=1"
+    },
+    {
+      "uid": "JA_Xv3zO_K9SuU_W000011",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 4,
+      "reason": "max_empty_window=4 > requested_window=1"
+    },
+    {
+      "uid": "EN_B00016_S00472_W000046",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "ZH_P0j1n-htgFu_W000014",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "JA_48elNGI2sVo_W000267",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 4,
+      "reason": "max_empty_window=4 > requested_window=1"
+    },
+    {
+      "uid": "JA_7sVJ5Fmygak_W000022",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "JA_B00001_S00577_W000003",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 5,
+      "reason": "max_empty_window=5 > requested_window=1"
+    },
+    {
+      "uid": "ZH_P3DbOZsH800_W000034",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "JA_6YxG4VtOq3M_W000012",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "EN_n_COVPwr54I_W000006",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 4,
+      "reason": "max_empty_window=4 > requested_window=1"
+    },
+    {
+      "uid": "ZH_ShY5gaBM9MI_W000028",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "EN_B00016_S01082_W000024",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "KO_E5GX5U4qdXY_W000004",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "EN_nd3VSjWd148_W000003",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "ZH_ShY5gaBM9MI_W000011",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "EN_B00016_S01462_W000036",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "ZH_UJBZXO0vtl8_W000131",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "KO_GFCl_rbj8jM_W000001",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "EN_ndiOC6coCI0_W000005",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "EN_nOtTM2Tg_DY_W000001",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "ZH_UJBZXO0vtl8_W000084",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "KO_ErZ6Q3-uZb8_W000007",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 5,
+      "reason": "max_empty_window=5 > requested_window=1"
+    },
+    {
+      "uid": "EN_nkR1jtzhDFY_W000034",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "JA_1u7y1Gam6ly_W000002",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "KO_EyI5xeRFbyu_W000022",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 5,
+      "reason": "max_empty_window=5 > requested_window=1"
+    },
+    {
+      "uid": "ZH_B00021_S03098_W000013",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "JA_Y8_nzz_wKN8_W000016",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 7,
+      "reason": "max_empty_window=7 > requested_window=1"
+    },
+    {
+      "uid": "KO_B00002_S00012_W000001",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "JA_4wtcjSQrmjg_W000022",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "KO_EBFCgXs9SPQ_W000037",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 4,
+      "reason": "max_empty_window=4 > requested_window=1"
+    },
+    {
+      "uid": "KO_Dl3QxRTDLhU_W000081",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "EN_oVINouZo8aQ_W000138",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "EN_nUk3lH51lD8_W000039",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 6,
+      "reason": "max_empty_window=6 > requested_window=1"
+    },
+    {
+      "uid": "EN_nSOXneMb4Ec_W000365",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "EN_nUk3lH51lD8_W000079",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    },
+    {
+      "uid": "EN_nLFyRxIRQBo_W000057",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 2,
+      "reason": "max_empty_window=2 > requested_window=1"
+    },
+    {
+      "uid": "KO_EAuwJ72nbgM_W000050",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 5,
+      "reason": "max_empty_window=5 > requested_window=1"
+    },
+    {
+      "uid": "JA_0WSDjPceAxQ_W000016",
+      "split": "test",
+      "translation_mode": "fixed_window",
+      "requested_window": 1,
+      "max_empty_window": 3,
+      "reason": "max_empty_window=3 > requested_window=1"
+    }
+  ],
+  "records_jsonl_path": "outputs/strict_test/gemma-4-E2B-it_1e-4_r16_adamw_bs16_rep12_epo1_conc90/checkpoint-4500/metrics/strict_test_records-fixed_window_1.jsonl"
+}
