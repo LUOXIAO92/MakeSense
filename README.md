@@ -117,8 +117,8 @@ Available now:
 
 TODO:
 - [x] **High priority**: test the thin LoRA trainer path with examples/train_lora.py on a tiny sample and confirm the rendered conversation, assistant-only loss setup, and 1-2 training steps behave correctly.
-- [ ] **High priority**: complete full LoRA training with `google/gemma-4-E2B-it`.
-  - **Completed**: an initial large-scale `gemma-4-E2B-it` training and evaluation run is complete; the [LoRA checkpoint is here](/lora/Gemma-4-E2B-it_lr3e-4_r16_bs16_bnb4bit_adamw_checkpoint-8100). See the metrics section in the results below for detailed data.
+- [x] **High priority**: complete full LoRA training with `google/gemma-4-E2B-it`.
+  - **Completed**: an initial large-scale `gemma-4-E2B-it` training and evaluation run is complete; the [LoRA checkpoint is here](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000). See the metrics section in the results below for detailed data.
   - **Ongoing**: I'm still fighting with the best hyper parameters and optimizing the vram usage. 
 - [ ] **Second-highest priority:** add an inference backend for running the trained streaming model.
   - **Ongoing**: related work is tracked in [MakeSense-Inference](https://github.com/LUOXIAO92/MakeSense-Inference.git).
@@ -314,26 +314,28 @@ Audio
   - AUDIO_CHUNK_SECONDS: 1.0
 
 Training Steps
-  - PER_DEVICE_TRAIN_BATCH_SIZE: 1
-  - PER_DEVICE_EVAL_BATCH_SIZE: 5
-  - GRADIENT_ACCUMULATION_STEPS: 16
+  - PER_DEVICE_TRAIN_BATCH_SIZE: 2
+  - PER_DEVICE_EVAL_BATCH_SIZE: 2
+  - GRADIENT_ACCUMULATION_STEPS: 8
   - EFFECTIVE_BATCH_SIZE: 16
-    `PER_DEVICE_TRAIN_BATCH_SIZE: 1 * GRADIENT_ACCUMULATION_STEPS: 16`
+    `PER_DEVICE_TRAIN_BATCH_SIZE: 2 * GRADIENT_ACCUMULATION_STEPS: 8`
   - OPTIMIZER_STEPS_PER_EPOCH: 1347
     `ceil(TRAIN_EXAMPLES: 21540 / EFFECTIVE_BATCH_SIZE: 16)`
-  - CONFIGURED_NUM_TRAIN_EPOCHS: 5
+  - CONFIGURED_NUM_TRAIN_EPOCHS: 1
   - CONFIGURED_MAX_STEPS: -1
-  - TOTAL_OPTIMIZER_STEPS: 6735
+  - TOTAL_OPTIMIZER_STEPS: 16155
     `OPTIMIZER_STEPS_PER_EPOCH: 1347 * CONFIGURED_NUM_TRAIN_EPOCHS: 5`
 
 Hyper Parmeters
-  - LEARNING_RATE: 2e-4
+  - LEARNING_RATE: 1e-4
   - WEIGHT_DECAY: 0.0
   - ADAM_BETA1: 0.9
   - ADAM_BETA2: 0.999
   - MAX_GRAD_NORM: 1.0
-  - NUM_TRAIN_EPOCHS: 5 (stop at 5400 step)
+  - NUM_TRAIN_EPOCHS: 1 (stop at 15000 step / total 16155)
 ```
+
+![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/training_metrics_plot.png)
 
 ### Results
 
@@ -402,9 +404,7 @@ All source/target wait/release accuracy metrics use protocol-adherent model turn
 - Meaning: the total number of assistant turns evaluated across all selected test records.
 - Calculation: sum of all generated/evaluated assistant outputs across `records`.
 
-#### Metrics: Gemma-4-E2B-it, learning rate=1e-4, rank=16, batch size=16, bnb nf4 4bit, adamw
-
-**Test metrics**:
+#### Gemma-4-E2B-it, learning rate=1e-4, rank=16, batch size=16, bnb nf4 4bit, adamw
 
 best overall - step 12000~15000 (early stop at step 15000)
 
@@ -429,93 +429,344 @@ best overall - step 12000~15000 (early stop at step 15000)
 Please refer to [strict test](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics) to veiw the result of strict test.
 
 
-**Training**:
-![](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch1_adamw_bnbnf4_checkpoint-15000/training_and_testing_metrics/training_metrics_plot.png)
-
-#### Test Outputs - step 300
+## Test Outputs - step 300 (left) vs 15000 (right)
 
 - tolerance window size: 1.0 s
-- The following selected test examples show ground truth on the left and model output on the right.
+- Selected examples compare step 300 and step 15000 outputs for the same README UID anchors.
 - concurrency=90, so the process time is high
-- Unlike the stric test during the training, in the case of vllm, I did not find the degeneration of quality in multi-batch processing
+- In vLLM testing, multi-batch processing did not show the quality degeneration seen in the hand-built training-time prompt cache test.
 
-##### ASR
-
-**SYSTEM_PROMPT**: You are a professional transcriptionist. Transcribe what you hear.
+### ASR
 
 ---
 
 - UID: JA_A7kJ7PmPk8g_W000017
 
-  | round | ground truth | predict | process time (ms) |
+  SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
+
+  | round | predict (300) | ground truth | predict (15000) |
   |---|---|---|---|
-  | 1 | `<src>最初から</src>` | `<src>最初から</src>` | 1848 |
-  | 2 | `<src>あの特に</src>` | `<src>あの</src>` | 865 |
-  | 3 | `<src>これなんかまだ</src>` | `<src>特に</src>` | 1508 |
-  | 4 | `<src>一年生ですからね。</src>` | `<src>中まだ1年生からね。</src>` | 545 |
-  | 5 | `<src>この時点で</src>` | `<src>はい、はい。</src>` | 907 |
-  | 6 | `<src>こう短く</src>` | `<src>その時点で</src>` | 2451 |
-  | 7 | `<src>剪定を</src>` | `<src>こう</src>` | 380 |
-  | 8 | `<src><\|wait\|></src>` | `<src>資格を</src>` | 2015 |
-  | 9 | `<src>こうタイズしてってあげると</src>` | `<src>とりあえず</src>` | 2086 |
-  | 10 | `<src>十年経っても</src>` | `<src>資格を</src>` | 762 |
-  | 11 | `<src>大した。</src>` | `<src>持っても</src>` | 2292 |
+  | 1 | `<src>最初から</src>` | `<src>最初から</src>` | `<src>最初から</src>` |
+  | 2 | `<src>あの</src>` | `<src>あの特に</src>` | `<src>あの特に</src>` |
+  | 3 | `<src>特に</src>` | `<src>これなんかまだ</src>` | `<src>これなんかまだ</src>` |
+  | 4 | `<src>中まだ1年生からね。</src>` | `<src>一年生ですからね。</src>` | `<src>一年生ですからね。</src>` |
+  | 5 | `<src>はい、はい。</src>` | `<src>この時点で</src>` | `<src>この時点で</src>` |
+  | 6 | `<src>その時点で</src>` | `<src>こう短く</src>` | `<src>こう短く</src>` |
+  | 7 | `<src>こう</src>` | `<src>剪定を</src>` | `<src>剪定を</src>` |
+  | 8 | `<src>資格を</src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 9 | `<src>とりあえず</src>` | `<src>こうタイズしてってあげると</src>` | `<src>こうタイズしてってあげると</src>` |
+  | 10 | `<src>資格を</src>` | `<src>十年経っても</src>` | `<src>十年経っても</src>` |
+  | 11 | `<src>持っても</src>` | `<src>大した。</src>` | `<src>大した。</src>` |
 
 ---
 
 - UID: ZH_B00041_S00155_W000028
 
-  | round | ground truth | predict | process time (ms) |
+  SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
+
+  | round | predict (300) | ground truth | predict (15000) |
   |---|---|---|---|
-  | 1 | `<src><\|wait\|></src>` | `<src>家长需要</src>` | 2310 |
-  | 2 | `<src>家长需要做的是，</src>` | `<src>做的是</src>` | 922 |
-  | 3 | `<src><\|wait\|></src>` | `<src>用我们</src>` | 1455 |
-  | 4 | `<src>用我们深深的</src>` | `<src>身上的爱胶水</src>` | 1235 |
-  | 5 | `<src>爱浇水、</src>` | `<src>是</src>` | 531 |
-  | 6 | `<src>施肥，</src>` | `<src>是</src>` | 2257 |
-  | 7 | `<src>给足</src>` | `<src>给儿子</src>` | 506 |
-  | 8 | `<src>孩子心理营养，</src>` | `<src>心里影响</src>` | 1780 |
-  | 9 | `<src><\|wait\|></src>` | `<src>给内心的</src>` | 2300 |
-  | 10 | `<src>并耐心等待孩子</src>` | `<src>孩子慢慢</src>` | 627 |
-  | 11 | `<src>慢慢长大。</src>` | `<src>长大</src>` | 2578 |
+  | 1 | `<src>家长需要</src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 2 | `<src>做的是</src>` | `<src>家长需要做的是，</src>` | `<src>家长需要做的是，</src>` |
+  | 3 | `<src>用我们</src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 4 | `<src>身上的爱胶水</src>` | `<src>用我们深深的</src>` | `<src>用我们深深的</src>` |
+  | 5 | `<src>是</src>` | `<src>爱浇水、</src>` | `<src>爱浇水、</src>` |
+  | 6 | `<src>是</src>` | `<src>施肥，</src>` | `<src>施肥，</src>` |
+  | 7 | `<src>给儿子</src>` | `<src>给足</src>` | `<src>给足</src>` |
+  | 8 | `<src>心里影响</src>` | `<src>孩子心理营养，</src>` | `<src>孩子心理营养，</src>` |
+  | 9 | `<src>给内心的</src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 10 | `<src>孩子慢慢</src>` | `<src>并耐心等待孩子</src>` | `<src>并耐心等待孩子</src>` |
+  | 11 | `<src>长大</src>` | `<src>慢慢长大。</src>` | `<src>慢慢长大。</src>` |
 
 ---
 
 - UID: KO_Djg2xNdyFCU_W000010
 
-  | round | ground truth | predict | process time (ms) |
+  SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
+
+  | round | predict (300) | ground truth | predict (15000) |
   |---|---|---|---|
-  | 1 | `<src><\|wait\|></src>` | `<src>I am </src>` | 1994 |
-  | 2 | `<src>아이 엠 애플 을 </src>` | `<src>Apple </src>` | 850 |
-  | 3 | `<src>촉발 시키고 </src>` | `<src>fruit </src>` | 1539 |
-  | 4 | `<src><\|wait\|></src>` | `<src>pick and </src>` | 1256 |
-  | 5 | `<src>자신 의 </src>` | `<src>eat </src>` | 651 |
-  | 6 | `<src><\|wait\|></src>` | `<src>your own </src>` | 2167 |
-  | 7 | `<src>부모 를 죽인 페르 나 </src>` | `<src>jogging </src>` | 944 |
-  | 8 | `<src><\|wait\|></src>` | `<src>heruna </src>` | 1432 |
-  | 9 | `<src>박한상과 </src>` | `<src>pachang </src>` | 2292 |
-  | 10 | `<src><\|wait\|></src>` | `<src>and </src>` | 638 |
-  | 11 | `<src>같은 세대 들입니다. </src>` | `<src>four generations </src>` | 2745 |
+  | 1 | `<src>I am </src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 2 | `<src>Apple </src>` | `<src>아이 엠 애플 을 </src>` | `<src>아이 엠 애플 을 </src>` |
+  | 3 | `<src>fruit </src>` | `<src>촉발 시키고 </src>` | `<src>촉발 시키고 </src>` |
+  | 4 | `<src>pick and </src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 5 | `<src>eat </src>` | `<src>자신 의 </src>` | `<src>자신 의 </src>` |
+  | 6 | `<src>your own </src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 7 | `<src>jogging </src>` | `<src>부모 를 죽인 페르 나 </src>` | `<src>부모 를 죽인 페르 나 </src>` |
+  | 8 | `<src>heruna </src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 9 | `<src>pachang </src>` | `<src>박한상과 </src>` | `<src>박한상과 </src>` |
+  | 10 | `<src>and </src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 11 | `<src>four generations </src>` | `<src>같은 세대 들입니다. </src>` | `<src>같은 세대 들입니다. </src>` |
 
 ---
 
 - UID: EN_nUuwxonVyYE_W000054
 
-  | round | ground truth | predict | process time (ms) |
+  SYSTEM_PROMPT: You are a professional transcriptionist. Transcribe what you hear.
+
+  | round | predict (300) | ground truth | predict (15000) |
   |---|---|---|---|
-  | 1 | `<src>What is your body </src>` | `<src>What is your body </src>` | 1869 |
-  | 2 | `<src>doing? </src>` | `<src>saying? </src>` | 907 |
-  | 3 | `<src>Drop into </src>` | `<src>Drop pin to your body. </src>` | 1565 |
-  | 4 | `<src>your body. </src>` | `<src>Where does </src>` | 1186 |
-  | 5 | `<src>Where does the tension </src>` | `<src>attention start? </src>` | 1165 |
-  | 6 | `<src>start? What is it? </src>` | `<src>What is it? Is it a </src>` | 1787 |
-  | 7 | `<src>Is it a headache? </src>` | `<src>day? Cuz it's a </src>` | 1320 |
-  | 8 | `<src>Is it a tightness in your chest? </src>` | `<src>time in your chest. </src>` | 2285 |
-  | 9 | `<src>I ask them what </src>` | `<src>I have a sob. </src>` | 1311 |
-  | 10 | `<src><\|wait\|></src>` | `<src>Like which are you using? </src>` | 2634 |
-  | 11 | `<src>language are you using? </src>` | `<src>Saying. </src>` | 1337 |
+  | 1 | `<src>What is your body </src>` | `<src>What is your body </src>` | `<src>What is your body </src>` |
+  | 2 | `<src>saying? </src>` | `<src>doing? </src>` | `<src>doing? </src>` |
+  | 3 | `<src>Drop pin to your body. </src>` | `<src>Drop into </src>` | `<src>Drop into </src>` |
+  | 4 | `<src>Where does </src>` | `<src>your body. </src>` | `<src>your body. </src>` |
+  | 5 | `<src>attention start? </src>` | `<src>Where does the tension </src>` | `<src>Where does the tension </src>` |
+  | 6 | `<src>What is it? Is it a </src>` | `<src>start? What is it? </src>` | `<src>start? What is it? </src>` |
+  | 7 | `<src>day? Cuz it's a </src>` | `<src>Is it a headache? </src>` | `<src>Is it a headache? </src>` |
+  | 8 | `<src>time in your chest. </src>` | `<src>Is it a tightness in your chest? </src>` | `<src>Is it a tightness in your chest? </src>` |
+  | 9 | `<src>I have a sob. </src>` | `<src>I ask them what </src>` | `<src>I ask them what </src>` |
+  | 10 | `<src>Like which are you using? </src>` | `<src><\|wait\|></src>` | `<src><\|wait\|></src>` |
+  | 11 | `<src>Saying. </src>` | `<src>language are you using? </src>` | `<src>language are you using? </src>` |
+
+
+### Conservative: 6 wait windows
 
 ---
 
+- UID: JA_A7kJ7PmPk8g_W000017
 
-> Under edit...
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Keep at least 6 wait windows before each target release.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>最初から</src><tgt><\|wait\|></tgt>` | `<src>最初から</src><tgt><\|wait\|></tgt>` | `<src>最初から</src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src>あの、特に</src><tgt><\|wait\|></tgt>` | `<src>あの特に</src><tgt><\|wait\|></tgt>` | `<src>あの特に</src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>中まだ1年</src><tgt><\|wait\|></tgt>` | `<src>これなんかまだ</src><tgt><\|wait\|></tgt>` | `<src>これなんかまだ</src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>生ですからね。</src><tgt><\|wait\|></tgt>` | `<src>一年生ですからね。</src><tgt><\|wait\|></tgt>` | `<src>一年生ですからね。</src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>はい、その時点で</src><tgt><\|wait\|></tgt>` | `<src>この時点で</src><tgt><\|wait\|></tgt>` | `<src>この時点で</src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>こう</src><tgt><\|wait\|></tgt>` | `<src>こう短く</src><tgt><\|wait\|></tgt>` | `<src>こう短く</src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>四角線で</src><tgt><\|wait\|></tgt>` | `<src>剪定を</src><tgt>从一开始，尤其是这一棵现在还只是一年生。在这个阶段</tgt>` | `<src>剪定を</src><tgt>从一开始，特别是现在才一年级。这个时候</tgt>` |
+  | 8 | `<src>こう</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>対数してい</src><tgt><\|wait\|></tgt>` | `<src>こうタイズしてってあげると</src><tgt><\|wait\|></tgt>` | `<src>こうタイズしてってあげると</src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>上げる</src><tgt><\|wait\|></tgt>` | `<src>十年経っても</src><tgt><\|wait\|></tgt>` | `<src>十年経っても</src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>と10年経っても</src><tgt><\|wait\|></tgt>` | `<src>大した。</src><tgt><\|wait\|></tgt>` | `<src>大した。</src><tgt><\|wait\|></tgt>` |
+
+---
+
+- UID: ZH_B00041_S00155_W000028
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English. Keep at least 6 wait windows before each target release.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>家长需要</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src>做的是</src><tgt><\|wait\|></tgt>` | `<src>家长需要做的是，</src><tgt><\|wait\|></tgt>` | `<src>家长需要做的是，</src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>用我们</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>生生的爱胶水</src><tgt><\|wait\|></tgt>` | `<src>用我们深深的</src><tgt><\|wait\|></tgt>` | `<src>用我们深深的</src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>湿气</src><tgt><\|wait\|></tgt>` | `<src>爱浇水、</src><tgt><\|wait\|></tgt>` | `<src>爱浇水、</src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>湿气</src><tgt><\|wait\|></tgt>` | `<src>施肥，</src><tgt><\|wait\|></tgt>` | `<src>施肥，</src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>去阻止孩子</src><tgt><\|wait\|></tgt>` | `<src>给足</src><tgt>What parents need to do is this: water and fertilize with our deep love,</tgt>` | `<src>给足</src><tgt>What parents need to do is water and fertilize with our deep love,</tgt>` |
+  | 8 | `<src>心瘾</src><tgt><\|wait\|></tgt>` | `<src>孩子心理营养，</src><tgt><\|wait\|></tgt>` | `<src>孩子心理营养，</src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>影响</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>你的孩子慢慢</src><tgt><\|wait\|></tgt>` | `<src>并耐心等待孩子</src><tgt><\|wait\|></tgt>` | `<src>并耐心等待孩子</src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>长大。</src><tgt><\|wait\|></tgt>` | `<src>慢慢长大。</src><tgt><\|wait\|></tgt>` | `<src>慢慢长大。</src><tgt><\|wait\|></tgt>` |
+
+---
+
+- UID: KO_Djg2xNdyFCU_W000010
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English. Keep at least 6 wait windows before each target release.
+
+  - TGT_METRICS: filtered (max_empty_window=8 > requested_window=6)
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>I am </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src>아이 엠 애플 을 </src><tgt><\|wait\|></tgt>` | `<src>아이 엠 애플 을 </src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>apple, </src><tgt><\|wait\|></tgt>` | `<src>촉발 시키고 </src><tgt><\|wait\|></tgt>` | `<src>촉발 시키고 </src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>축 썰기 고. </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src>자신 의 </src><tgt><\|wait\|></tgt>` | `<src>자신 의 </src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>자신의 모로 조깅 </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>헤르나 </src><tgt><\|wait\|></tgt>` | `<src>부모 를 죽인 페르 나 </src><tgt><\|wait\|></tgt>` | `<src>부모 를 죽인 페르 나 </src><tgt><\|wait\|></tgt>` |
+  | 8 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>박찬과 </src><tgt><\|wait\|></tgt>` | `<src>박한상과 </src><tgt>Park Han- sang is the degenerate who triggered the IMF crisis and killed his own parents.</tgt>` | `<src>박한상과 </src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>같은 세대들이 </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>입니다. </src><tgt><\|wait\|></tgt>` | `<src>같은 세대 들입니다. </src><tgt><\|wait\|></tgt>` | `<src>같은 세대 들입니다. </src><tgt>They are the same generation that triggered the MEAP— the Park Han- sang who killed his own parents.</tgt>` |
+
+---
+
+- UID: EN_nUuwxonVyYE_W000054
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Keep at least 6 wait windows before each target release.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>What is your body </src><tgt><\|wait\|></tgt>` | `<src>What is your body </src><tgt><\|wait\|></tgt>` | `<src>What is your body </src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src>doing? </src><tgt><\|wait\|></tgt>` | `<src>doing? </src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>saying, "Drop pin your body </src><tgt><\|wait\|></tgt>` | `<src>Drop into </src><tgt><\|wait\|></tgt>` | `<src>Drop into </src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>where does </src><tgt><\|wait\|></tgt>` | `<src>your body. </src><tgt><\|wait\|></tgt>` | `<src>your body. </src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>attention start? </src><tgt><\|wait\|></tgt>` | `<src>Where does the tension </src><tgt><\|wait\|></tgt>` | `<src>Where does the tension </src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src>start? What is it? </src><tgt><\|wait\|></tgt>` | `<src>start? What is it? </src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>What is it is a day, </src><tgt><\|wait\|></tgt>` | `<src>Is it a headache? </src><tgt>你的身体在做什么？感受一下你的身体。紧张感从哪里开始？是什么样的？是头痛吗？</tgt>` | `<src>Is it a headache? </src><tgt>你的身体在做什么呢？进入你的身体里。紧张感从哪里开始？是什么感觉？是头痛吗？</tgt>` |
+  | 8 | `<src>cause it's time </src><tgt><\|wait\|></tgt>` | `<src>Is it a tightness in your chest? </src><tgt><\|wait\|></tgt>` | `<src>Is it a tightness in your chest? </src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>in your chest. </src><tgt><\|wait\|></tgt>` | `<src>I ask them what </src><tgt><\|wait\|></tgt>` | `<src>I ask them what </src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>I have a sob, </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>like which are you using, </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt><\|wait\|></tgt>` |
+
+
+### Fixed window: 6 wait windows
+
+---
+
+- UID: JA_A7kJ7PmPk8g_W000017
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Tolerance window size is 6.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>最初</src><tgt><\|wait\|></tgt>` | `<src>最初から</src><tgt><\|wait\|></tgt>` | `<src>最初から</src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src>から</src><tgt><\|wait\|></tgt>` | `<src>あの特に</src><tgt><\|wait\|></tgt>` | `<src>あの特に</src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>あの、特に</src><tgt><\|wait\|></tgt>` | `<src>これなんかまだ</src><tgt><\|wait\|></tgt>` | `<src>これなんかまだ</src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>中まだ1年生</src><tgt><\|wait\|></tgt>` | `<src>一年生ですからね。</src><tgt><\|wait\|></tgt>` | `<src>一年生ですからね。</src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>ですからね。はい、</src><tgt><\|wait\|></tgt>` | `<src>この時点で</src><tgt><\|wait\|></tgt>` | `<src>この時点で</src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>その時点で</src><tgt><\|wait\|></tgt>` | `<src>こう短く</src><tgt><\|wait\|></tgt>` | `<src>こう短く</src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>こう</src><tgt><\|wait\|></tgt>` | `<src>剪定を</src><tgt>从一开始，尤其是这一棵现在还只是一年生。在这个阶段</tgt>` | `<src>剪定を</src><tgt>从一开始，特别是现在才一年级。这个时候</tgt>` |
+  | 8 | `<src>積極</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>に</src><tgt><\|wait\|></tgt>` | `<src>こうタイズしてってあげると</src><tgt><\|wait\|></tgt>` | `<src>こうタイズしてってあげると</src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>持っていった</src><tgt><\|wait\|></tgt>` | `<src>十年経っても</src><tgt><\|wait\|></tgt>` | `<src>十年経っても</src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>一年経っても</src><tgt><\|wait\|></tgt>` | `<src>大した。</src><tgt><\|wait\|></tgt>` | `<src>大した。</src><tgt><\|wait\|></tgt>` |
+
+---
+
+- UID: ZH_B00041_S00155_W000028
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English. Tolerance window size is 6.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>家长需要</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src>做的是</src><tgt><\|wait\|></tgt>` | `<src>家长需要做的是，</src><tgt><\|wait\|></tgt>` | `<src>家长需要做的是，</src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>用我们</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>生生的爱胶水</src><tgt><\|wait\|></tgt>` | `<src>用我们深深的</src><tgt><\|wait\|></tgt>` | `<src>用我们深深的</src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>湿气</src><tgt><\|wait\|></tgt>` | `<src>爱浇水、</src><tgt><\|wait\|></tgt>` | `<src>爱浇水、</src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>湿气</src><tgt><\|wait\|></tgt>` | `<src>施肥，</src><tgt><\|wait\|></tgt>` | `<src>施肥，</src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>去阻止孩子</src><tgt><\|wait\|></tgt>` | `<src>给足</src><tgt>What parents need to do is this: water and fertilize with our deep love,</tgt>` | `<src>给足</src><tgt>What parents need to do is water and fertilize with our deep love,</tgt>` |
+  | 8 | `<src>心瘾</src><tgt><\|wait\|></tgt>` | `<src>孩子心理营养，</src><tgt><\|wait\|></tgt>` | `<src>孩子心理营养，</src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>影响</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>你的孩子慢慢</src><tgt><\|wait\|></tgt>` | `<src>并耐心等待孩子</src><tgt><\|wait\|></tgt>` | `<src>并耐心等待孩子</src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>长大。</src><tgt><\|wait\|></tgt>` | `<src>慢慢长大。</src><tgt><\|wait\|></tgt>` | `<src>慢慢长大。</src><tgt><\|wait\|></tgt>` |
+
+---
+
+- UID: KO_Djg2xNdyFCU_W000010
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English. Tolerance window size is 6.
+
+  - TGT_METRICS: filtered (max_empty_window=8 > requested_window=6)
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>I am </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src>아이 엠 애플 을 </src><tgt><\|wait\|></tgt>` | `<src>아이 엠 애플 을 </src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>어버이 척박히고 </src><tgt><\|wait\|></tgt>` | `<src>촉발 시키고 </src><tgt><\|wait\|></tgt>` | `<src>촉발 시키고 </src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>자신의 </src><tgt><\|wait\|></tgt>` | `<src>자신 의 </src><tgt><\|wait\|></tgt>` | `<src>자신 의 </src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>모로 죽기 </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>모로 죽기 </src><tgt><\|wait\|></tgt>` | `<src>부모 를 죽인 페르 나 </src><tgt><\|wait\|></tgt>` | `<src>부모 를 죽인 페르 나 </src><tgt>I am triggering the affair</tgt>` |
+  | 8 | `<src>하려나 </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src>박한상과 </src><tgt><\|wait\|></tgt>` | `<src>박한상과 </src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>박한 상과 </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>같은 세대들이 </src><tgt><\|wait\|></tgt>` | `<src>같은 세대 들입니다. </src><tgt><\|wait\|></tgt>` | `<src>같은 세대 들입니다. </src><tgt><\|wait\|></tgt>` |
+
+---
+
+- UID: EN_nUuwxonVyYE_W000054
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese. Tolerance window size is 6.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>What is your body </src><tgt><\|wait\|></tgt>` | `<src>What is your body </src><tgt><\|wait\|></tgt>` | `<src>What is your body </src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src>saying, </src><tgt><\|wait\|></tgt>` | `<src>doing? </src><tgt><\|wait\|></tgt>` | `<src>doing? </src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>drop pin to your body. </src><tgt><\|wait\|></tgt>` | `<src>Drop into </src><tgt><\|wait\|></tgt>` | `<src>Drop into </src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>Where does </src><tgt><\|wait\|></tgt>` | `<src>your body. </src><tgt><\|wait\|></tgt>` | `<src>your body. </src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>attention start? </src><tgt><\|wait\|></tgt>` | `<src>Where does the tension </src><tgt><\|wait\|></tgt>` | `<src>Where does the tension </src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>What is it? Is it a </src><tgt><\|wait\|></tgt>` | `<src>start? What is it? </src><tgt><\|wait\|></tgt>` | `<src>start? What is it? </src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>day? </src><tgt><\|wait\|></tgt>` | `<src>Is it a headache? </src><tgt>你的身体在做什么？感受一下你的身体。紧张感从哪里开始？是什么样的？是头痛吗？</tgt>` | `<src>Is it a headache? </src><tgt>你的身体在做什么呢？进入你的身体里。紧张感从哪里开始？是什么感觉？是头痛吗？</tgt>` |
+  | 8 | `<src>Is it time is in your chest? </src><tgt><\|wait\|></tgt>` | `<src>Is it a tightness in your chest? </src><tgt><\|wait\|></tgt>` | `<src>Is it a tightness in your chest? </src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>I have a sob, </src><tgt><\|wait\|></tgt>` | `<src>I ask them what </src><tgt><\|wait\|></tgt>` | `<src>I ask them what </src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>lament which are you </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>using? </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt><\|wait\|></tgt>` |
+
+
+### Natural
+
+---
+
+- UID: JA_A7kJ7PmPk8g_W000017
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>最初から</src><tgt><\|wait\|></tgt>` | `<src>最初から</src><tgt>从一开始，</tgt>` | `<src>最初から</src><tgt>一开始</tgt>` |
+  | 2 | `<src>あの、特に</src><tgt><\|wait\|></tgt>` | `<src>あの特に</src><tgt>尤其是</tgt>` | `<src>あの特に</src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>中まだ1年</src><tgt><\|wait\|></tgt>` | `<src>これなんかまだ</src><tgt>这一棵</tgt>` | `<src>これなんかまだ</src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>生ですからね。</src><tgt><\|wait\|></tgt>` | `<src>一年生ですからね。</src><tgt>现在还只是一年生。</tgt>` | `<src>一年生ですからね。</src><tgt>就是，这个还没满一年呢。</tgt>` |
+  | 5 | `<src>はい、その時点で</src><tgt><\|wait\|></tgt>` | `<src>この時点で</src><tgt>在这个阶段</tgt>` | `<src>この時点で</src><tgt>这时候</tgt>` |
+  | 6 | `<src>こう</src><tgt><\|wait\|></tgt>` | `<src>こう短く</src><tgt><\|wait\|></tgt>` | `<src>こう短く</src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>資格を</src><tgt><\|wait\|></tgt>` | `<src>剪定を</src><tgt><\|wait\|></tgt>` | `<src>剪定を</src><tgt><\|wait\|></tgt>` |
+  | 8 | `<src>こう</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>退職してあげると</src><tgt><\|wait\|></tgt>` | `<src>こうタイズしてってあげると</src><tgt>如果能把剪枝持续做好的话，</tgt>` | `<src>こうタイズしてってあげると</src><tgt>如果把它剪短一点，收紧一点，</tgt>` |
+  | 10 | `<src>10年経っても</src><tgt><\|wait\|></tgt>` | `<src>十年経っても</src><tgt>十年后也不会</tgt>` | `<src>十年経っても</src><tgt>就算过了十年，</tgt>` |
+  | 11 | `<src>大丈夫だ。</src><tgt><\|wait\|></tgt>` | `<src>大した。</src><tgt>有什么大……</tgt>` | `<src>大した。</src><tgt>它也不会有事。</tgt>` |
+
+---
+
+- UID: ZH_B00041_S00155_W000028
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>家长</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src>需要做的是</src><tgt><\|wait\|></tgt>` | `<src>家长需要做的是，</src><tgt>What parents need to do is this:</tgt>` | `<src>家长需要做的是，</src><tgt>What parents need to do is</tgt>` |
+  | 3 | `<src>用我们</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>生生的爱胶水</src><tgt><\|wait\|></tgt>` | `<src>用我们深深的</src><tgt><\|wait\|></tgt>` | `<src>用我们深深的</src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>湿气</src><tgt><\|wait\|></tgt>` | `<src>爱浇水、</src><tgt><\|wait\|></tgt>` | `<src>爱浇水、</src><tgt>water- water our deep love,</tgt>` |
+  | 6 | `<src>湿气</src><tgt><\|wait\|></tgt>` | `<src>施肥，</src><tgt>water and fertilize with our deep love,</tgt>` | `<src>施肥，</src><tgt>fertilize them,</tgt>` |
+  | 7 | `<src>去阻止孩子</src><tgt><\|wait\|></tgt>` | `<src>给足</src><tgt><\|wait\|></tgt>` | `<src>给足</src><tgt><\|wait\|></tgt>` |
+  | 8 | `<src>心瘾</src><tgt><\|wait\|></tgt>` | `<src>孩子心理营养，</src><tgt>give children enough psychological nourishment,</tgt>` | `<src>孩子心理营养，</src><tgt>and provide our children with enough psychological nourishment,</tgt>` |
+  | 9 | `<src>影响</src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>你的孩子慢慢</src><tgt><\|wait\|></tgt>` | `<src>并耐心等待孩子</src><tgt>and wait patiently for</tgt>` | `<src>并耐心等待孩子</src><tgt>and patiently wait for them</tgt>` |
+  | 11 | `<src>长大。</src><tgt><\|wait\|></tgt>` | `<src>慢慢长大。</src><tgt>them to grow slowly.</tgt>` | `<src>慢慢长大。</src><tgt>to grow up slowly.</tgt>` |
+
+---
+
+- UID: KO_Djg2xNdyFCU_W000010
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to English.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>I am </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 2 | `<src>Apple </src><tgt><\|wait\|></tgt>` | `<src>아이 엠 애플 을 </src><tgt><\|wait\|></tgt>` | `<src>아이 엠 애플 을 </src><tgt><\|wait\|></tgt>` |
+  | 3 | `<src>초밥 </src><tgt><\|wait\|></tgt>` | `<src>촉발 시키고 </src><tgt><\|wait\|></tgt>` | `<src>촉발 시키고 </src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 5 | `<src>치키고 </src><tgt><\|wait\|></tgt>` | `<src>자신 의 </src><tgt><\|wait\|></tgt>` | `<src>자신 의 </src><tgt><\|wait\|></tgt>` |
+  | 6 | `<src>자신의 모로 조깅 </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 7 | `<src>헤르나 </src><tgt><\|wait\|></tgt>` | `<src>부모 를 죽인 페르 나 </src><tgt><\|wait\|></tgt>` | `<src>부모 를 죽인 페르 나 </src><tgt><\|wait\|></tgt>` |
+  | 8 | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 9 | `<src>박찬과 </src><tgt><\|wait\|></tgt>` | `<src>박한상과 </src><tgt>Park Han- sang is the degenerate who triggered the IMF crisis and killed his own parents.</tgt>` | `<src>박한상과 </src><tgt><\|wait\|></tgt>` |
+  | 10 | `<src>같은 세대들이 </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>있답니다. </src><tgt><\|wait\|></tgt>` | `<src>같은 세대 들입니다. </src><tgt>They are the same generation as him.</tgt>` | `<src>같은 세대 들입니다. </src><tgt>They are the same generation that triggered the MEAP— the Park Han- sang who killed his own parents.</tgt>` |
+
+---
+
+- UID: EN_nUuwxonVyYE_W000054
+
+  SYSTEM_PROMPT: You are a professional simultaneous interpreter. Translate to Chinese.
+
+  | round | predict (300) | ground truth | predict (15000) |
+  |---|---|---|---|
+  | 1 | `<src>What is your body </src><tgt><\|wait\|></tgt>` | `<src>What is your body </src><tgt>你的身体</tgt>` | `<src>What is your body </src><tgt>你的身体</tgt>` |
+  | 2 | `<src>saying, </src><tgt><\|wait\|></tgt>` | `<src>doing? </src><tgt>在做什么？</tgt>` | `<src>doing? </src><tgt>在做什么？</tgt>` |
+  | 3 | `<src>drop pin to your body. </src><tgt><\|wait\|></tgt>` | `<src>Drop into </src><tgt>感受一下</tgt>` | `<src>Drop into </src><tgt><\|wait\|></tgt>` |
+  | 4 | `<src>Where does </src><tgt><\|wait\|></tgt>` | `<src>your body. </src><tgt>你的身体。</tgt>` | `<src>your body. </src><tgt>进入你的身体。</tgt>` |
+  | 5 | `<src>attention start? </src><tgt><\|wait\|></tgt>` | `<src>Where does the tension </src><tgt>紧张感从哪里</tgt>` | `<src>Where does the tension </src><tgt>紧张感</tgt>` |
+  | 6 | `<src>What is it? Is it a </src><tgt><\|wait\|></tgt>` | `<src>start? What is it? </src><tgt>开始？是什么样的？</tgt>` | `<src>start? What is it? </src><tgt>从哪里开始？是什么？</tgt>` |
+  | 7 | `<src>day? </src><tgt><\|wait\|></tgt>` | `<src>Is it a headache? </src><tgt>是头痛吗？</tgt>` | `<src>Is it a headache? </src><tgt>是头痛吗？</tgt>` |
+  | 8 | `<src>Is it time is in your chest? </src><tgt><\|wait\|></tgt>` | `<src>Is it a tightness in your chest? </src><tgt>还是胸口紧绷？</tgt>` | `<src>Is it a tightness in your chest? </src><tgt>是胸闷吗？</tgt>` |
+  | 9 | `<src>I have a sob, </src><tgt><\|wait\|></tgt>` | `<src>I ask them what </src><tgt>我问他们，</tgt>` | `<src>I ask them what </src><tgt>我问他们</tgt>` |
+  | 10 | `<src>lament which are you used </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
+  | 11 | `<src>saying. </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` |
