@@ -707,17 +707,17 @@ def _base_record_to_training_example(
     )
 
 
-def _build_training_examples_from_source_record_groups(
+def _build_training_examples_from_source_records(
     rng: random.Random,
-    source_record_groups: list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]],
+    source_records: list[_TranslationSourceRecord],
     *,
     task_ratio: tuple[float, float],
     translation_task_config: TranslationTaskConfig,
     max_window_size: int,
 ) -> list[TrainingExample]:
-    """Assign task/subtask labels from UID occurrences before target-language rows."""
+    """Assign task/subtask labels over train translation-row occurrences."""
 
-    sample_count = len(source_record_groups)
+    sample_count = len(source_records)
     if sample_count == 0:
         return []
 
@@ -729,14 +729,8 @@ def _build_training_examples_from_source_record_groups(
 
     examples: list[TrainingExample] = []
     translation_label_idx = 0
-    target_offsets: dict[MetadataSplitKey, int] = {}
-    target_counts: dict[MetadataSplitKey, int] = {}
-    for (group_key, group_source_records), task_label in zip(source_record_groups, task_labels):
-        source_records = _sorted_source_records_for_sampling(group_source_records)
-        if not source_records:
-            raise ValueError(f"Metadata group has no source records: {group_key}")
+    for source_record, task_label in zip(source_records, task_labels):
         if task_label == "asr":
-            source_record = source_records[0]
             base_record = _source_record_to_base_training_record(
                 source_record,
                 translation_mode="natural",
@@ -744,11 +738,6 @@ def _build_training_examples_from_source_record_groups(
             )
             examples.append(_base_record_to_training_example(base_record, "asr", max_window_size=max_window_size))
             continue
-        if group_key not in target_offsets:
-            target_offsets[group_key] = rng.randrange(len(source_records))
-        target_count = target_counts.get(group_key, 0)
-        source_record = source_records[(target_offsets[group_key] + target_count) % len(source_records)]
-        target_counts[group_key] = target_count + 1
         translation_subtask = translation_labels[translation_label_idx]
         translation_label_idx += 1
         base_record = _build_sampled_training_record(
@@ -829,10 +818,13 @@ def build_training_dataset(
     example.  ``-1`` keeps all windows, ``0`` is invalid, and positive values keep
     the first N windows.  Processor-level truncation must not be used for this.
 
-    Train examples use ``task_ratio`` as the split-global ``(translation, asr)``
-    ratio over metadata/audio UID occurrences.  ASR is an exclusive task slot.
+    Train examples use split-local translation rows as the sample base.  The
+    selected train rows are repeated by ``dataset_repeat`` before ``task_ratio``
+    is applied as the split-global ``(translation, asr)`` ratio over those row
+    occurrences.  ASR is an exclusive task slot on the occurrence's source UID;
+    translation examples use the occurrence's own target-language row.
     ``translation_task_config`` is then used only for selected translation
-    examples after a target-language row has been chosen.
+    examples.
 
     Validation/test examples are evaluation sets, not training samples: each
     metadata/audio UID contributes one ASR example, and each target-language
@@ -850,7 +842,7 @@ def build_training_dataset(
     split membership are used instead of ``dataset_root`` / ``total_samples`` /
     ``split_ratio`` / ``seed``.
 
-    ``dataset_repeat`` repeats only the selected train metadata/audio groups.
+    ``dataset_repeat`` repeats only the selected train translation rows.
     Validation/test examples are built before the repeated train examples, so
     train-side repetition cannot change validation/test style labels, sampled
     translation windows, or final example order.  No ``**kwargs`` are used: all
@@ -882,7 +874,7 @@ def build_training_dataset(
         source_records = _build_translation_source_records(split_manifest["dataset_root"])
         split_groups = _source_record_groups_from_manifest(source_records, split_manifest)
 
-    train_source_record_groups = split_groups["train"] * dataset_repeat
+    train_source_records = _flatten_source_record_groups(split_groups["train"]) * dataset_repeat
     validate_source_record_groups = split_groups["validate"]
     test_source_record_groups = split_groups["test"]
 
@@ -898,9 +890,9 @@ def build_training_dataset(
         translation_task_config=translation_task_config,
         max_window_size=max_window_size,
     )
-    train_examples = _build_training_examples_from_source_record_groups(
+    train_examples = _build_training_examples_from_source_records(
         rng,
-        train_source_record_groups,
+        train_source_records,
         task_ratio=task_ratio,
         translation_task_config=translation_task_config,
         max_window_size=max_window_size,
