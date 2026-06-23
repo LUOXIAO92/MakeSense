@@ -283,7 +283,7 @@ assistant
 このプロジェクトの推論 backend を作るときは、vLLM guided decoding / structured outputs や llama.cpp GBNF grammar などの制約付きデコードを使い、出力を現在サポートしている 6 種類のプロトコル形式に制限します。詳細は [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md) を参照してください。
 
 ## 大規模検証結果 (`google/gemma-4-E2B-it`, `train_examples: 21540`):
-
+<!-- 
 ### 学習パラメータ
 
 ```text
@@ -753,4 +753,4 @@ Please refer to [strict test](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch
   | 8 | `<src>Is it time is in your chest? </src><tgt><\|wait\|></tgt>` | `<src>Is it a tightness in your chest? </src><tgt>还是胸口紧绷？</tgt>` | `<src>Is it a tightness in your chest? </src><tgt>是胸闷吗？</tgt>` |
   | 9 | `<src>I have a sob, </src><tgt><\|wait\|></tgt>` | `<src>I ask them what </src><tgt>我问他们，</tgt>` | `<src>I ask them what </src><tgt>我问他们</tgt>` |
   | 10 | `<src>lament which are you used </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
-  | 11 | `<src>saying. </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` |
+  | 11 | `<src>saying. </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` | -->

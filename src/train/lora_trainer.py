@@ -18,7 +18,7 @@ import json
 import math as _math
 import os
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -28,10 +28,16 @@ from mm_assistant_mask import (
     build_assistant_labels,
 )
 
-from data_loader.dataset import TrainingExample, TrainingDatasetSplits, TranslationTaskConfig, build_training_dataset
+from data_loader.dataset import (
+    TrainingExample,
+    TrainingDatasetSplits,
+    TranslationTaskConfig,
+    build_training_dataset,
+    load_dataset_split_manifest,
+)
 from train.audio import audio_chunks_for_example, load_audio_waveform, split_audio_into_chunks, validate_example_chunk_counts
 from train.continue_utils import ContinuePlan, confirm_resume_arg_mismatches, timestamp_run_dir_name
-from train.formatting import ChatMessage, example_to_messages
+from train.formatting import ChatMessage, example_to_messages, render_chat_template
 from train.monitoring import MakeSenseMonitoringCallback, TensorBoardServer, latest_logged_metrics_from_state
 
 @dataclass(frozen=True)
@@ -50,6 +56,7 @@ class TrainingDataConfig:
     })
     dataset_repeat: int = 1
     seed: int = 4021
+    split_manifest_path: str | Path | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +81,12 @@ class LoraTrainConfig:
     eval_steps: int = 100
     prediction_loss_only: bool = True
     eval_accumulation_steps: int | None = 1
+    train_input_mode: str = "audio"
+    text_only_user_content: str = "Text-only ablation input."
+    dataloader_num_workers: int = 0
+    dataloader_pin_memory: bool = True
+    dataloader_persistent_workers: bool = False
+    dataloader_prefetch_factor: int | None = None
     save_steps: int = 500
     max_grad_norm: float = 1.0
     max_steps: int = -1
@@ -204,9 +217,9 @@ def count_audio_slots(messages: list[ChatMessage]) -> int:
 
 def _render_chat(processor: Any, messages: list[ChatMessage]) -> str:
     try:
-        rendered = processor.apply_chat_template(
+        return render_chat_template(
+            processor,
             messages,
-            tokenize=False,
             add_generation_prompt=False,
             enable_thinking=False,
         )
@@ -214,7 +227,6 @@ def _render_chat(processor: Any, messages: list[ChatMessage]) -> str:
         raise ValueError("Real-audio training requires processor.apply_chat_template") from exc
     except TypeError:
         raise
-    return str(rendered)
 
 
 def _labels_from_assistant_mask(
@@ -300,6 +312,69 @@ class MakeSenseAudioCollator:
             flat_audio_chunks.extend(audio_chunks)
 
         batch = self._call_processor(rendered_texts, flat_audio_chunks)
+        batch["labels"] = _labels_from_assistant_mask(
+            batch,
+            processor=self.processor,
+            spec=self.assistant_mask_spec,
+        )
+        batch.pop("assistant_masks", None)
+        batch.pop("completion_mask", None)
+        batch.pop("assistant_tokens_mask", None)
+        return batch
+
+
+def _text_only_messages(messages: list[ChatMessage], *, user_content: str) -> list[ChatMessage]:
+    converted: list[ChatMessage] = []
+    for message in messages:
+        if message.get("role") == "user":
+            converted.append({"role": "user", "content": str(user_content)})
+        else:
+            converted.append(dict(message))
+    return converted
+
+
+class MakeSenseTextOnlyCollator:
+    """Text-only ablation collator that preserves assistant targets and masks."""
+
+    def __init__(
+        self,
+        processor: Any,
+        *,
+        assistant_header: str,
+        assistant_end: str,
+        generation_stop: str,
+        user_content: str,
+    ) -> None:
+        if not assistant_header or not assistant_end or not generation_stop:
+            raise ValueError("Assistant frame spec values must be provided by the orchestration layer")
+        self.processor = processor
+        self.user_content = str(user_content)
+        self.assistant_mask_spec = AssistantMaskSpec(
+            assistant_header=assistant_header,
+            assistant_end=assistant_end,
+            generation_stop=generation_stop,
+        )
+
+    def _call_processor(self, rendered_texts: list[str]) -> dict[str, Any]:
+        try:
+            batch = self.processor(
+                text=rendered_texts,
+                return_tensors="pt",
+                padding=True,
+            )
+        except AttributeError as exc:
+            raise ValueError("Text-only training requires callable processor(text=...)") from exc
+        except TypeError:
+            raise
+        return dict(batch)
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
+        rendered_texts: list[str] = []
+        for feature in features:
+            messages = _text_only_messages(feature["messages"], user_content=self.user_content)
+            rendered_texts.append(_render_chat(self.processor, messages))
+
+        batch = self._call_processor(rendered_texts)
         batch["labels"] = _labels_from_assistant_mask(
             batch,
             processor=self.processor,
@@ -450,6 +525,7 @@ def _format_startup_metadata(
         "",
         "Paths",
         f"  - DATASET_ROOT: {data_config.dataset_root}",
+        f"  - DATASET_SPLIT_JSON_PATH: {data_config.split_manifest_path or 'none'}",
         f"  - OUTPUT_DIR: {train_config.output_dir}",
         f"  - LOGGING_DIR: {logging_dir}",
         f"  - TENSORBOARD_ROOT: {tensorboard_root}",
@@ -470,6 +546,7 @@ def _format_startup_metadata(
         "Audio",
         f"  - AUDIO_SAMPLING_RATE: {train_config.audio_sampling_rate}",
         f"  - AUDIO_CHUNK_SECONDS: {train_config.audio_chunk_seconds}",
+        f"  - TRAIN_INPUT_MODE: {train_config.train_input_mode}",
         "",
         "Training Steps",
         f"  - OPTIMIZER: {train_config.optimizer}",
@@ -527,6 +604,7 @@ def _test_metadata(
 ) -> dict[str, Any]:
     return {
         "dataset_root": str(data_config.dataset_root),
+        "split_manifest_path": None if data_config.split_manifest_path is None else str(data_config.split_manifest_path),
         "output_dir": str(train_config.output_dir),
         "logging_dir": str(logging_dir),
         "tensorboard_root": str(tensorboard_root),
@@ -554,6 +632,9 @@ def train_lora(
     _set_seed(train_config.seed)
     if not train_config.assistant_header or not train_config.assistant_end or not train_config.generation_stop:
         raise ValueError("LoraTrainConfig requires assistant_header, assistant_end, and generation_stop")
+    if data_config.split_manifest_path is not None:
+        split_manifest = load_dataset_split_manifest(data_config.split_manifest_path)
+        data_config = replace(data_config, dataset_root=split_manifest["dataset_root"])
     output_dir = Path(train_config.output_dir)
     splits = build_training_dataset(
         data_config.dataset_root,
@@ -564,6 +645,7 @@ def train_lora(
         translation_task_config=data_config.translation_task_config,
         dataset_repeat=data_config.dataset_repeat,
         seed=data_config.seed,
+        split_manifest_path=data_config.split_manifest_path,
     )
     train_rows, validate_rows, test_rows = _build_train_validate_test_rows(splits)
     translation_distribution_bin1 = summarize_translation_task_distribution(splits.train, bin_size=1)
@@ -594,13 +676,31 @@ def train_lora(
     os.environ.setdefault("WANDB_DISABLED", "true")
     if train_config.report_to == "tensorboard":
         os.environ["TENSORBOARD_LOGGING_DIR"] = str(logging_dir)
-    data_collator = MakeSenseAudioCollator(
-        processor,
-        audio_sampling_rate=train_config.audio_sampling_rate,
-        audio_chunk_seconds=train_config.audio_chunk_seconds,
-        assistant_header=train_config.assistant_header,
-        assistant_end=train_config.assistant_end,
-        generation_stop=train_config.generation_stop,
+    if train_config.train_input_mode == "audio":
+        data_collator = MakeSenseAudioCollator(
+            processor,
+            audio_sampling_rate=train_config.audio_sampling_rate,
+            audio_chunk_seconds=train_config.audio_chunk_seconds,
+            assistant_header=train_config.assistant_header,
+            assistant_end=train_config.assistant_end,
+            generation_stop=train_config.generation_stop,
+        )
+    elif train_config.train_input_mode == "text_only":
+        data_collator = MakeSenseTextOnlyCollator(
+            processor,
+            assistant_header=train_config.assistant_header,
+            assistant_end=train_config.assistant_end,
+            generation_stop=train_config.generation_stop,
+            user_content=train_config.text_only_user_content,
+        )
+    else:
+        raise ValueError("train_input_mode must be 'audio' or 'text_only'")
+    dataloader_num_workers = int(train_config.dataloader_num_workers)
+    dataloader_persistent_workers = (
+        bool(train_config.dataloader_persistent_workers) if dataloader_num_workers > 0 else False
+    )
+    dataloader_prefetch_factor = (
+        train_config.dataloader_prefetch_factor if dataloader_num_workers > 0 else None
     )
 
     args = TrainingArguments(
@@ -620,6 +720,10 @@ def train_lora(
         eval_steps=train_config.eval_steps,
         prediction_loss_only=train_config.prediction_loss_only,
         eval_accumulation_steps=train_config.eval_accumulation_steps,
+        dataloader_num_workers=dataloader_num_workers,
+        dataloader_pin_memory=train_config.dataloader_pin_memory,
+        dataloader_persistent_workers=dataloader_persistent_workers,
+        dataloader_prefetch_factor=dataloader_prefetch_factor,
         save_steps=train_config.save_steps,
         max_grad_norm=train_config.max_grad_norm,
         bf16=True,

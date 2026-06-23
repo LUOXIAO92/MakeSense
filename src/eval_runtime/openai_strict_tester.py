@@ -31,7 +31,7 @@ from core.build_conversation import (
     count_max_empty_translation_windows,
 )
 from data_loader.dataset import TrainingExample
-from data_loader.dataset import load_metadata, load_transcriptions, load_translations
+from data_loader.dataset import load_dataset_split_manifest, load_metadata, load_transcriptions, load_translations
 from train.audio import audio_chunks_for_example
 from train.formatting import ChatMessage, example_to_messages
 from train.tester import (
@@ -95,6 +95,7 @@ class OpenAIStrictTestConfig:
     max_window_size: int = -1
     seed: int = 4021
     split_ratio: tuple[float, float, float] = (0.8975, 0.1, 0.0025)
+    split_manifest_path: str | Path | None = None
     splits: tuple[SplitName, ...] = ("validate", "test")
     style_specs: tuple[StrictStyleSpec, ...] = (StrictStyleSpec("natural", (None,)),)
     test_record_count: int = -1
@@ -202,6 +203,64 @@ def _sample_records(
     return [rng.choice(records) for _ in range(count)]
 
 
+def _runtime_metadata_split_key(source_record: "_RuntimeSourceRecord") -> tuple[str, str]:
+    return (source_record.source_language, source_record.uid)
+
+
+def _group_runtime_records_by_metadata(
+    source_records: list["_RuntimeSourceRecord"],
+) -> list[tuple[tuple[str, str], list["_RuntimeSourceRecord"]]]:
+    grouped: dict[tuple[str, str], list[_RuntimeSourceRecord]] = {}
+    for source_record in source_records:
+        grouped.setdefault(_runtime_metadata_split_key(source_record), []).append(source_record)
+    return list(grouped.items())
+
+
+def _flatten_runtime_record_groups(
+    groups: list[tuple[tuple[str, str], list["_RuntimeSourceRecord"]]],
+) -> list["_RuntimeSourceRecord"]:
+    return [source_record for _, records in groups for source_record in records]
+
+
+def _sample_runtime_record_groups(
+    rng: random.Random,
+    groups: list[tuple[tuple[str, str], list["_RuntimeSourceRecord"]]],
+    count: int,
+) -> list[tuple[tuple[str, str], list["_RuntimeSourceRecord"]]]:
+    if count == 0:
+        return []
+    if not groups:
+        raise ValueError("Cannot sample requested metadata groups from an empty task pool")
+    if count <= len(groups):
+        return rng.sample(groups, count)
+    return [rng.choice(groups) for _ in range(count)]
+
+
+def _runtime_groups_from_manifest(
+    source_records: list["_RuntimeSourceRecord"],
+    manifest: dict[str, Any],
+) -> dict[str, list[tuple[tuple[str, str], list["_RuntimeSourceRecord"]]]]:
+    available = dict(_group_runtime_records_by_metadata(source_records))
+    used: dict[tuple[str, str], str] = {}
+    split_groups: dict[str, list[tuple[tuple[str, str], list[_RuntimeSourceRecord]]]] = {
+        "train": [],
+        "validate": [],
+        "test": [],
+    }
+    for split_name in ("train", "validate", "test"):
+        for item in manifest["splits"][split_name]:
+            key = (item["source_language_code"], item["uid"])
+            if key in used:
+                raise ValueError(
+                    f"Split manifest metadata key appears in both {used[key]} and {split_name}: {key}"
+                )
+            if key not in available:
+                raise ValueError(f"Split manifest key not found in dataset: {key}")
+            used[key] = split_name
+            split_groups[split_name].append((key, available[key]))
+    return split_groups
+
+
 def _build_runtime_source_records(dataset_root: str | Path) -> list[_RuntimeSourceRecord]:
     transcriptions = load_transcriptions(dataset_root)
     metadata_by_key = load_metadata(dataset_root)
@@ -274,18 +333,31 @@ def _limit_windows(outputs: list[str], *, max_window_size: int) -> list[str]:
 
 def _runtime_source_records_by_split(config: OpenAIStrictTestConfig) -> dict[str, list[_RuntimeSourceRecord]]:
     rng = random.Random(config.seed)
-    source_records = _build_runtime_source_records(config.dataset_root)
-    base_sample_count = len(source_records) if config.total_samples is None else min(config.total_samples, len(source_records))
-    sampled_source_records = _sample_records(rng, source_records, base_sample_count)
-    rng.shuffle(sampled_source_records)
-
-    train_count, validate_count, test_count = _counts_from_ratio(base_sample_count, config.split_ratio)
-    train_end = train_count
-    validate_end = train_end + validate_count
-    test_end = validate_end + test_count
+    if config.split_manifest_path is None:
+        source_records = _build_runtime_source_records(config.dataset_root)
+        groups = _group_runtime_records_by_metadata(source_records)
+        base_sample_count = len(groups) if config.total_samples is None else min(config.total_samples, len(groups))
+        sampled_groups = _sample_runtime_record_groups(rng, groups, base_sample_count)
+        rng.shuffle(sampled_groups)
+        train_count, validate_count, test_count = _counts_from_ratio(base_sample_count, config.split_ratio)
+        train_end = train_count
+        validate_end = train_end + validate_count
+        test_end = validate_end + test_count
+        split_groups = {
+            "validate": sampled_groups[train_end:validate_end],
+            "test": sampled_groups[validate_end:test_end],
+        }
+    else:
+        split_manifest = load_dataset_split_manifest(config.split_manifest_path)
+        source_records = _build_runtime_source_records(split_manifest["dataset_root"])
+        manifest_groups = _runtime_groups_from_manifest(source_records, split_manifest)
+        split_groups = {
+            "validate": manifest_groups["validate"],
+            "test": manifest_groups["test"],
+        }
     return {
-        "validate": sampled_source_records[train_end:validate_end],
-        "test": sampled_source_records[validate_end:test_end],
+        "validate": _flatten_runtime_record_groups(split_groups["validate"]),
+        "test": _flatten_runtime_record_groups(split_groups["test"]),
     }
 
 
@@ -784,6 +856,7 @@ def _metrics_json_payload(
         "constrained_decoding": bool(config.constrained_decoding),
         "splits": list(config.splits),
         "split_ratio": list(config.split_ratio),
+        "split_manifest_path": None if config.split_manifest_path is None else str(config.split_manifest_path),
         "total_samples": config.total_samples,
         "max_window_size": config.max_window_size,
         "test_record_count": config.test_record_count,

@@ -12,7 +12,7 @@ import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from configs.config import Config
 from core.build_conversation import (
@@ -29,6 +29,8 @@ TaskName = Literal["asr", "translation"]
 TranslationMode = Literal["natural", "fixed_window", "conservative"]
 TranslationTaskName = Literal["natural", "fixed_window", "conservative"]
 TranslationTaskConfig = dict[str, dict[str, float | int | None]]
+DatasetSplitName = Literal["train", "validate", "test"]
+MetadataSplitKey = tuple[str, str]
 
 
 @dataclass(frozen=True)
@@ -265,6 +267,205 @@ def _sample_examples(
     if count <= len(examples):
         return rng.sample(examples, count)
     return [rng.choice(examples) for _ in range(count)]
+
+
+def _metadata_split_key(source_record: _TranslationSourceRecord) -> MetadataSplitKey:
+    return (source_record.source_language, source_record.uid)
+
+
+def _group_source_records_by_metadata(
+    source_records: list[_TranslationSourceRecord],
+) -> list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]]:
+    grouped: dict[MetadataSplitKey, list[_TranslationSourceRecord]] = {}
+    for source_record in source_records:
+        grouped.setdefault(_metadata_split_key(source_record), []).append(source_record)
+    return list(grouped.items())
+
+
+def _flatten_source_record_groups(
+    groups: list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]],
+) -> list[_TranslationSourceRecord]:
+    return [source_record for _, records in groups for source_record in records]
+
+
+def _sorted_source_records_for_sampling(
+    records: list[_TranslationSourceRecord],
+) -> list[_TranslationSourceRecord]:
+    return sorted(records, key=lambda record: record.target_language)
+
+
+def _sample_source_record_groups(
+    rng: random.Random,
+    groups: list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]],
+    count: int,
+) -> list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]]:
+    if count == 0:
+        return []
+    if not groups:
+        raise ValueError("Cannot sample requested metadata groups from an empty task pool")
+    if count <= len(groups):
+        return rng.sample(groups, count)
+    return [rng.choice(groups) for _ in range(count)]
+
+
+def _split_source_record_groups(
+    groups: list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]],
+    split_ratio: tuple[float, float, float],
+) -> dict[DatasetSplitName, list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]]]:
+    train_count, validate_count, test_count = _counts_from_ratio(len(groups), split_ratio)
+    train_end = train_count
+    validate_end = train_end + validate_count
+    test_end = validate_end + test_count
+    return {
+        "train": groups[:train_end],
+        "validate": groups[train_end:validate_end],
+        "test": groups[validate_end:test_end],
+    }
+
+
+def _metadata_key_to_json(key: MetadataSplitKey) -> dict[str, str]:
+    source_language_code, uid = key
+    return {
+        "source_language": _language_name(source_language_code),
+        "source_language_code": source_language_code,
+        "uid": uid,
+    }
+
+
+def _metadata_key_from_json(item: Any) -> MetadataSplitKey:
+    if not isinstance(item, dict):
+        raise ValueError(f"Split manifest entry must be an object: {item!r}")
+    source_language = item.get("source_language")
+    source_language_code = item.get("source_language_code")
+    uid = item.get("uid")
+    if not isinstance(source_language, str) or not isinstance(source_language_code, str) or not isinstance(uid, str):
+        raise ValueError(
+            "Split manifest entry requires string source_language, source_language_code, and uid: "
+            f"{item!r}"
+        )
+    expected_language = _language_name(source_language_code)
+    if source_language != expected_language:
+        raise ValueError(
+            "Split manifest source_language must match Config.lang_code2name[source_language_code]: "
+            f"source_language={source_language!r}, source_language_code={source_language_code!r}, "
+            f"expected={expected_language!r}"
+        )
+    return (source_language_code, uid)
+
+
+def build_dataset_split_manifest(
+    dataset_root: str | Path,
+    *,
+    total_samples: int | None = None,
+    split_ratio: tuple[float, float, float] = (8, 1.5, 0.5),
+    seed: int = 4021,
+) -> dict[str, Any]:
+    """Build a reusable metadata/audio-level train/validate/test split manifest."""
+
+    if len(split_ratio) != 3:
+        raise ValueError(f"split_ratio must be (train, validate, test), got: {split_ratio}")
+    rng = random.Random(seed)
+    source_records = _build_translation_source_records(dataset_root)
+    groups = _group_source_records_by_metadata(source_records)
+    requested_total_samples: int | str = "all" if total_samples is None else int(total_samples)
+    sample_count = len(groups) if total_samples is None else min(total_samples, len(groups))
+    sampled_groups = _sample_source_record_groups(rng, groups, sample_count)
+    rng.shuffle(sampled_groups)
+    split_groups = _split_source_record_groups(sampled_groups, split_ratio)
+
+    splits = {
+        split_name: [_metadata_key_to_json(key) for key, _ in split_groups[split_name]]
+        for split_name in ("train", "validate", "test")
+    }
+    row_counts = {
+        split_name: sum(len(records) for _, records in split_groups[split_name])
+        for split_name in ("train", "validate", "test")
+    }
+    group_counts = {
+        split_name: len(split_groups[split_name])
+        for split_name in ("train", "validate", "test")
+    }
+    return {
+        "dataset_root": str(dataset_root),
+        "sampling": {
+            "requested_total_samples": requested_total_samples,
+            "total_samples": sample_count,
+            "seed": seed,
+            "split_ratio": list(split_ratio),
+        },
+        "splits": splits,
+        "counts": {
+            "metadata_group_count": group_counts,
+            "translation_row_count": row_counts,
+        },
+    }
+
+
+def write_dataset_split_manifest(
+    output_path: str | Path,
+    dataset_root: str | Path,
+    *,
+    total_samples: int | None = None,
+    split_ratio: tuple[float, float, float] = (8, 1.5, 0.5),
+    seed: int = 4021,
+) -> dict[str, Any]:
+    """Write a reusable metadata/audio-level split manifest and return its payload."""
+
+    payload = build_dataset_split_manifest(
+        dataset_root,
+        total_samples=total_samples,
+        split_ratio=split_ratio,
+        seed=seed,
+    )
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
+def load_dataset_split_manifest(split_manifest_path: str | Path) -> dict[str, Any]:
+    payload = json.loads(Path(split_manifest_path).read_text(encoding="utf-8"))
+    dataset_root = payload.get("dataset_root")
+    if not isinstance(dataset_root, str) or not dataset_root:
+        raise ValueError("Split manifest requires non-empty dataset_root")
+    splits = payload.get("splits")
+    if not isinstance(splits, dict):
+        raise ValueError("Split manifest requires splits object")
+    for split_name in ("train", "validate", "test"):
+        if split_name not in splits or not isinstance(splits[split_name], list):
+            raise ValueError(f"Split manifest requires splits.{split_name} list")
+        seen: set[MetadataSplitKey] = set()
+        for item in splits[split_name]:
+            key = _metadata_key_from_json(item)
+            if key in seen:
+                raise ValueError(f"Duplicate metadata key in manifest split {split_name}: {key}")
+            seen.add(key)
+    return payload
+
+
+def _source_record_groups_from_manifest(
+    source_records: list[_TranslationSourceRecord],
+    manifest: dict[str, Any],
+) -> dict[DatasetSplitName, list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]]]:
+    available = dict(_group_source_records_by_metadata(source_records))
+    used: dict[MetadataSplitKey, str] = {}
+    split_groups: dict[DatasetSplitName, list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]]] = {
+        "train": [],
+        "validate": [],
+        "test": [],
+    }
+    for split_name in ("train", "validate", "test"):
+        for item in manifest["splits"][split_name]:
+            key = _metadata_key_from_json(item)
+            if key in used:
+                raise ValueError(
+                    f"Split manifest metadata key appears in both {used[key]} and {split_name}: {key}"
+                )
+            if key not in available:
+                raise ValueError(f"Split manifest key not found in dataset: {key}")
+            used[key] = split_name
+            split_groups[split_name].append((key, available[key]))
+    return split_groups
 
 
 def _validate_translation_task_config(config: TranslationTaskConfig) -> None:
@@ -506,17 +707,17 @@ def _base_record_to_training_example(
     )
 
 
-def _build_training_examples_from_source_records(
+def _build_training_examples_from_source_record_groups(
     rng: random.Random,
-    source_records: list[_TranslationSourceRecord],
+    source_record_groups: list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]],
     *,
     task_ratio: tuple[float, float],
     translation_task_config: TranslationTaskConfig,
     max_window_size: int,
 ) -> list[TrainingExample]:
-    """Assign task/subtask labels and convert selected source rows to examples."""
+    """Assign task/subtask labels from UID occurrences before target-language rows."""
 
-    sample_count = len(source_records)
+    sample_count = len(source_record_groups)
     if sample_count == 0:
         return []
 
@@ -528,8 +729,14 @@ def _build_training_examples_from_source_records(
 
     examples: list[TrainingExample] = []
     translation_label_idx = 0
-    for source_record, task_label in zip(source_records, task_labels):
+    target_offsets: dict[MetadataSplitKey, int] = {}
+    target_counts: dict[MetadataSplitKey, int] = {}
+    for (group_key, group_source_records), task_label in zip(source_record_groups, task_labels):
+        source_records = _sorted_source_records_for_sampling(group_source_records)
+        if not source_records:
+            raise ValueError(f"Metadata group has no source records: {group_key}")
         if task_label == "asr":
+            source_record = source_records[0]
             base_record = _source_record_to_base_training_record(
                 source_record,
                 translation_mode="natural",
@@ -537,6 +744,11 @@ def _build_training_examples_from_source_records(
             )
             examples.append(_base_record_to_training_example(base_record, "asr", max_window_size=max_window_size))
             continue
+        if group_key not in target_offsets:
+            target_offsets[group_key] = rng.randrange(len(source_records))
+        target_count = target_counts.get(group_key, 0)
+        source_record = source_records[(target_offsets[group_key] + target_count) % len(source_records)]
+        target_counts[group_key] = target_count + 1
         translation_subtask = translation_labels[translation_label_idx]
         translation_label_idx += 1
         base_record = _build_sampled_training_record(
@@ -551,6 +763,54 @@ def _build_training_examples_from_source_records(
     return examples
 
 
+def _build_eval_examples_from_source_record_groups(
+    rng: random.Random,
+    source_record_groups: list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]],
+    *,
+    translation_task_config: TranslationTaskConfig,
+    max_window_size: int,
+) -> list[TrainingExample]:
+    """Build deterministic eval/test examples after metadata-level split."""
+
+    if not source_record_groups:
+        return []
+
+    asr_examples: list[TrainingExample] = []
+    translation_source_records: list[_TranslationSourceRecord] = []
+    for group_key, group_source_records in source_record_groups:
+        source_records = _sorted_source_records_for_sampling(group_source_records)
+        if not source_records:
+            raise ValueError(f"Metadata group has no source records: {group_key}")
+        asr_base_record = _source_record_to_base_training_record(
+            source_records[0],
+            translation_mode="natural",
+            requested_window=None,
+        )
+        asr_examples.append(
+            _base_record_to_training_example(asr_base_record, "asr", max_window_size=max_window_size)
+        )
+        translation_source_records.extend(source_records)
+
+    translation_labels = _translation_task_labels(translation_task_config, len(translation_source_records))
+    rng.shuffle(translation_labels)
+
+    translation_examples: list[TrainingExample] = []
+    for source_record, translation_subtask in zip(translation_source_records, translation_labels):
+        base_record = _build_sampled_training_record(
+            rng,
+            source_record,
+            translation_mode=translation_subtask,
+            translation_task_config=translation_task_config,
+        )
+        translation_examples.append(
+            _base_record_to_training_example(base_record, "translation", max_window_size=max_window_size)
+        )
+
+    examples = asr_examples + translation_examples
+    rng.shuffle(examples)
+    return examples
+
+
 def build_training_dataset(
     dataset_root: str | Path,
     *,
@@ -561,25 +821,38 @@ def build_training_dataset(
     translation_task_config: TranslationTaskConfig,
     dataset_repeat: int = 1,
     seed: int = 4021,
+    split_manifest_path: str | Path | None = None,
 ) -> TrainingDatasetSplits:
-    """Build fixed-size train/validate/test splits from translation base records.
+    """Build train/validate/test splits from metadata/audio-level groups.
 
     ``max_window_size`` controls how many streaming windows are kept per training
     example.  ``-1`` keeps all windows, ``0`` is invalid, and positive values keep
     the first N windows.  Processor-level truncation must not be used for this.
 
-    ``task_ratio`` is ``(translation, asr)`` and is one configuration group.
-    ``translation_task_config`` is a separate group used only after a selected
-    sample has been assigned to the ``translation`` task.  Its required keys are
-    ``natural``, ``fixed_window``, and ``conservative``; their ``ratio`` values
-    are normalized together.  ``fixed_window`` / ``conservative`` additionally
-    accept explicit ``min`` / ``max`` window bounds.  ``None`` lower bounds mean
-    ``1`` by default, so zero-window training is included only when ``min`` is
-    explicitly set to ``0``.
+    Train examples use ``task_ratio`` as the split-global ``(translation, asr)``
+    ratio over metadata/audio UID occurrences.  ASR is an exclusive task slot.
+    ``translation_task_config`` is then used only for selected translation
+    examples after a target-language row has been chosen.
 
-    ``dataset_repeat`` repeats only the selected train source-record pool.
+    Validation/test examples are evaluation sets, not training samples: each
+    metadata/audio UID contributes one ASR example, and each target-language
+    translation row contributes one translation example.  Translation styles are
+    balanced across those translation rows with ``translation_task_config``.
+    ``fixed_window`` / ``conservative`` additionally accept explicit ``min`` /
+    ``max`` window bounds.  ``None`` lower bounds mean ``1`` by default, so
+    zero-window training/evaluation is included only when ``min`` is explicitly
+    set to ``0``.
+
+    Split membership is always decided by metadata/audio key
+    ``(source_language, uid)`` before flattening back to translation rows.  This
+    keeps all target-language rows for the same audio file in the same split.
+    When ``split_manifest_path`` is provided, the manifest's dataset root and
+    split membership are used instead of ``dataset_root`` / ``total_samples`` /
+    ``split_ratio`` / ``seed``.
+
+    ``dataset_repeat`` repeats only the selected train metadata/audio groups.
     Validation/test examples are built before the repeated train examples, so
-    train-side repetition cannot change validation/test task labels, sampled
+    train-side repetition cannot change validation/test style labels, sampled
     translation windows, or final example order.  No ``**kwargs`` are used: all
     sampling controls are explicit parameters.
     """
@@ -597,37 +870,37 @@ def build_training_dataset(
 
     rng = random.Random(seed)
     _validate_translation_task_config(translation_task_config)
-    source_records = _build_translation_source_records(dataset_root)
-    base_sample_count = len(source_records) if total_samples is None else min(total_samples, len(source_records))
-    sampled_source_records = _sample_examples(rng, source_records, base_sample_count)
-    rng.shuffle(sampled_source_records)
+    if split_manifest_path is None:
+        source_records = _build_translation_source_records(dataset_root)
+        groups = _group_source_records_by_metadata(source_records)
+        base_sample_count = len(groups) if total_samples is None else min(total_samples, len(groups))
+        sampled_groups = _sample_source_record_groups(rng, groups, base_sample_count)
+        rng.shuffle(sampled_groups)
+        split_groups = _split_source_record_groups(sampled_groups, split_ratio)
+    else:
+        split_manifest = load_dataset_split_manifest(split_manifest_path)
+        source_records = _build_translation_source_records(split_manifest["dataset_root"])
+        split_groups = _source_record_groups_from_manifest(source_records, split_manifest)
 
-    train_count, validate_count, test_count = _counts_from_ratio(base_sample_count, split_ratio)
-    train_end = train_count
-    validate_end = train_end + validate_count
-    test_end = validate_end + test_count
+    train_source_record_groups = split_groups["train"] * dataset_repeat
+    validate_source_record_groups = split_groups["validate"]
+    test_source_record_groups = split_groups["test"]
 
-    train_source_records = sampled_source_records[:train_end] * dataset_repeat
-    validate_source_records = sampled_source_records[train_end:validate_end]
-    test_source_records = sampled_source_records[validate_end:test_end]
-
-    validate_examples = _build_training_examples_from_source_records(
+    validate_examples = _build_eval_examples_from_source_record_groups(
         rng,
-        validate_source_records,
-        task_ratio=task_ratio,
+        validate_source_record_groups,
         translation_task_config=translation_task_config,
         max_window_size=max_window_size,
     )
-    test_examples = _build_training_examples_from_source_records(
+    test_examples = _build_eval_examples_from_source_record_groups(
         rng,
-        test_source_records,
-        task_ratio=task_ratio,
+        test_source_record_groups,
         translation_task_config=translation_task_config,
         max_window_size=max_window_size,
     )
-    train_examples = _build_training_examples_from_source_records(
+    train_examples = _build_training_examples_from_source_record_groups(
         rng,
-        train_source_records,
+        train_source_record_groups,
         task_ratio=task_ratio,
         translation_task_config=translation_task_config,
         max_window_size=max_window_size,

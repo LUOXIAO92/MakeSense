@@ -19,6 +19,7 @@ TOTAL_SAMPLES: int | None = None
 MAX_WINDOW_SIZE = -1
 SEED = 4021
 SPLIT_RATIO: tuple[float, float, float] = (0.8975, 0.1, 0.0025)
+DATASET_SPLIT_JSON_PATH: Path | None = None
 TEST_SPLITS = ("test",)
 
 
@@ -71,6 +72,7 @@ def main() -> None:
             max_window_size=MAX_WINDOW_SIZE,
             seed=SEED,
             split_ratio=SPLIT_RATIO,
+            split_manifest_path=DATASET_SPLIT_JSON_PATH,
             splits=TEST_SPLITS,
             style_specs=STRICT_TRANSLATION_STYLES,
             test_record_count=TEST_RECORD_COUNT,

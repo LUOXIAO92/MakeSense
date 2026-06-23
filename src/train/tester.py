@@ -10,7 +10,7 @@ from typing import Any
 import torch
 
 from train.audio import audio_chunks_for_example
-from train.formatting import ChatMessage
+from train.formatting import ChatMessage, render_chat_template
 from train.vram import cuda_vram_usage_gib, format_vram_usage
 
 
@@ -21,13 +21,12 @@ def render_chat(
     add_generation_prompt: bool,
     enable_thinking: bool,
 ) -> str:
-    rendered = processor.apply_chat_template(
+    return render_chat_template(
+        processor,
         messages,
-        tokenize=False,
         add_generation_prompt=add_generation_prompt,
         enable_thinking=enable_thinking,
     )
-    return str(rendered)
 
 
 def assistant_turn_indices(messages: list[ChatMessage]) -> list[int]:

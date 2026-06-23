@@ -301,6 +301,9 @@ When building the inference backend for this project, constrained decoding will 
 
 ## Large-scale validation results (`google/gemma-4-E2B-it`, `train_examples: 21540`):
 
+# IMPORTANT: SINCE I LEAKED THE TRAIN SET WITH A STUPID BUG (SPLIT THE DATASET FROM TRANSLATION RECORDS BUT NOT AUDIO RECORDS), THE FOLLOWING METIRCS IS UNRELIABLE. I WILL RETRAIN THE LORA SOON. ALSO SINCE THERE ARE NO AVALIABLE DETAILED AUDIO METRICS OF GEMMA4, I WILL SWITCH THE BASE MODEL TO QWEN2.5-OMNI
+
+<!-- 
 ### Training paramenters
 
 ```text
@@ -770,3 +773,4 @@ Please refer to [strict test](lora/Gemma-4-E2B-it_lr1e-4_r16_bs16_repeat12_epoch
   | 9 | `<src>I have a sob, </src><tgt><\|wait\|></tgt>` | `<src>I ask them what </src><tgt>我问他们，</tgt>` | `<src>I ask them what </src><tgt>我问他们</tgt>` |
   | 10 | `<src>lament which are you used </src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` | `<src><\|wait\|></src><tgt><\|wait\|></tgt>` |
   | 11 | `<src>saying. </src><tgt><\|wait\|></tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` | `<src>language are you using? </src><tgt>你在用什么语言？</tgt>` |
+--->

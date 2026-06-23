@@ -95,6 +95,27 @@ def example_to_messages(example: TrainingExample) -> list[ChatMessage]:
     return messages
 
 
+def _is_qwen2_5_omni_processor(processor: object) -> bool:
+    return processor.__class__.__name__ == "Qwen2_5OmniProcessor"
+
+
+def render_chat_template(
+    processor: object,
+    messages: list[ChatMessage],
+    *,
+    add_generation_prompt: bool,
+    enable_thinking: bool,
+) -> str:
+    kwargs: dict[str, Any] = {
+        "tokenize": False,
+        "add_generation_prompt": add_generation_prompt,
+    }
+    if not _is_qwen2_5_omni_processor(processor):
+        kwargs["enable_thinking"] = enable_thinking
+    rendered = processor.apply_chat_template(messages, **kwargs)
+    return str(rendered)
+
+
 def messages_to_chat_text(processor: object, messages: list[ChatMessage]) -> str:
     """Render chat messages as model-specific training text.
 
@@ -102,9 +123,9 @@ def messages_to_chat_text(processor: object, messages: list[ChatMessage]) -> str
     """
 
     try:
-        rendered = processor.apply_chat_template(
+        return render_chat_template(
+            processor,
             messages,
-            tokenize=False,
             add_generation_prompt=False,
             enable_thinking=False,
         )
@@ -112,4 +133,3 @@ def messages_to_chat_text(processor: object, messages: list[ChatMessage]) -> str
         raise ValueError("Real-audio training requires processor.apply_chat_template")
     except TypeError:
         raise
-    return str(rendered)
