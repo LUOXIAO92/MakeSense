@@ -707,39 +707,45 @@ def _base_record_to_training_example(
     )
 
 
-def _build_training_examples_from_source_records(
+def _build_asr_examples_from_source_record_groups(
+    source_record_groups: list[tuple[MetadataSplitKey, list[_TranslationSourceRecord]]],
+    *,
+    max_window_size: int,
+) -> list[TrainingExample]:
+    """Build one ASR example per metadata/audio UID group."""
+
+    asr_examples: list[TrainingExample] = []
+    for group_key, group_source_records in source_record_groups:
+        source_records = _sorted_source_records_for_sampling(group_source_records)
+        if not source_records:
+            raise ValueError(f"Metadata group has no source records: {group_key}")
+        base_record = _source_record_to_base_training_record(
+            source_records[0],
+            translation_mode="natural",
+            requested_window=None,
+        )
+        asr_examples.append(_base_record_to_training_example(base_record, "asr", max_window_size=max_window_size))
+    return asr_examples
+
+
+def _build_translation_examples_from_source_records(
     rng: random.Random,
     source_records: list[_TranslationSourceRecord],
     *,
-    task_ratio: tuple[float, float],
     translation_task_config: TranslationTaskConfig,
     max_window_size: int,
 ) -> list[TrainingExample]:
-    """Assign task/subtask labels over train translation-row occurrences."""
+    """Assign translation styles/windows over translation-row occurrences."""
 
     sample_count = len(source_records)
     if sample_count == 0:
         return []
 
-    translation_count, asr_count = _counts_from_ratio(sample_count, task_ratio)
-    task_labels: list[TaskName] = ["translation"] * translation_count + ["asr"] * asr_count
-    rng.shuffle(task_labels)
-    translation_labels = _translation_task_labels(translation_task_config, translation_count)
+    translation_labels = _translation_task_labels(translation_task_config, sample_count)
     rng.shuffle(translation_labels)
 
     examples: list[TrainingExample] = []
-    translation_label_idx = 0
-    for source_record, task_label in zip(source_records, task_labels):
-        if task_label == "asr":
-            base_record = _source_record_to_base_training_record(
-                source_record,
-                translation_mode="natural",
-                requested_window=None,
-            )
-            examples.append(_base_record_to_training_example(base_record, "asr", max_window_size=max_window_size))
-            continue
-        translation_subtask = translation_labels[translation_label_idx]
-        translation_label_idx += 1
+    for source_record, translation_subtask in zip(source_records, translation_labels):
         base_record = _build_sampled_training_record(
             rng,
             source_record,
@@ -764,36 +770,19 @@ def _build_eval_examples_from_source_record_groups(
     if not source_record_groups:
         return []
 
-    asr_examples: list[TrainingExample] = []
+    asr_examples = _build_asr_examples_from_source_record_groups(
+        source_record_groups,
+        max_window_size=max_window_size,
+    )
     translation_source_records: list[_TranslationSourceRecord] = []
-    for group_key, group_source_records in source_record_groups:
-        source_records = _sorted_source_records_for_sampling(group_source_records)
-        if not source_records:
-            raise ValueError(f"Metadata group has no source records: {group_key}")
-        asr_base_record = _source_record_to_base_training_record(
-            source_records[0],
-            translation_mode="natural",
-            requested_window=None,
-        )
-        asr_examples.append(
-            _base_record_to_training_example(asr_base_record, "asr", max_window_size=max_window_size)
-        )
-        translation_source_records.extend(source_records)
-
-    translation_labels = _translation_task_labels(translation_task_config, len(translation_source_records))
-    rng.shuffle(translation_labels)
-
-    translation_examples: list[TrainingExample] = []
-    for source_record, translation_subtask in zip(translation_source_records, translation_labels):
-        base_record = _build_sampled_training_record(
-            rng,
-            source_record,
-            translation_mode=translation_subtask,
-            translation_task_config=translation_task_config,
-        )
-        translation_examples.append(
-            _base_record_to_training_example(base_record, "translation", max_window_size=max_window_size)
-        )
+    for _, group_source_records in source_record_groups:
+        translation_source_records.extend(_sorted_source_records_for_sampling(group_source_records))
+    translation_examples = _build_translation_examples_from_source_records(
+        rng,
+        translation_source_records,
+        translation_task_config=translation_task_config,
+        max_window_size=max_window_size,
+    )
 
     examples = asr_examples + translation_examples
     rng.shuffle(examples)
@@ -818,13 +807,12 @@ def build_training_dataset(
     example.  ``-1`` keeps all windows, ``0`` is invalid, and positive values keep
     the first N windows.  Processor-level truncation must not be used for this.
 
-    Train examples use split-local translation rows as the sample base.  The
-    selected train rows are repeated by ``dataset_repeat`` before ``task_ratio``
-    is applied as the split-global ``(translation, asr)`` ratio over those row
-    occurrences.  ASR is an exclusive task slot on the occurrence's source UID;
-    translation examples use the occurrence's own target-language row.
-    ``translation_task_config`` is then used only for selected translation
-    examples.
+    Train ASR examples use split-local metadata/audio UID groups as the sample
+    base: one ASR example is built per UID.  Train translation examples use
+    split-local translation rows as the sample base, and those rows are repeated
+    by ``dataset_repeat`` before translation style/window sampling.
+    ``task_ratio`` is accepted for compatibility but does not control example
+    counts.
 
     Validation/test examples are evaluation sets, not training samples: each
     metadata/audio UID contributes one ASR example, and each target-language
@@ -875,6 +863,7 @@ def build_training_dataset(
         split_groups = _source_record_groups_from_manifest(source_records, split_manifest)
 
     train_source_records = _flatten_source_record_groups(split_groups["train"]) * dataset_repeat
+    train_asr_source_record_groups = split_groups["train"]
     validate_source_record_groups = split_groups["validate"]
     test_source_record_groups = split_groups["test"]
 
@@ -890,13 +879,18 @@ def build_training_dataset(
         translation_task_config=translation_task_config,
         max_window_size=max_window_size,
     )
-    train_examples = _build_training_examples_from_source_records(
+    train_asr_examples = _build_asr_examples_from_source_record_groups(
+        train_asr_source_record_groups,
+        max_window_size=max_window_size,
+    )
+    train_translation_examples = _build_translation_examples_from_source_records(
         rng,
         train_source_records,
-        task_ratio=task_ratio,
         translation_task_config=translation_task_config,
         max_window_size=max_window_size,
     )
+    train_examples = train_asr_examples + train_translation_examples
+    rng.shuffle(train_examples)
 
     return TrainingDatasetSplits(
         train=train_examples,
