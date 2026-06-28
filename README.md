@@ -299,9 +299,12 @@ As long as concurrent or batched generation exists, there is extra risk: the nex
 
 When building the inference backend for this project, constrained decoding will be used, for example vLLM guided decoding / structured outputs or llama.cpp GBNF grammar, to restrict outputs to the six currently supported protocol forms. See [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md) for details.
 
-## Large-scale validation results (`google/gemma-4-E2B-it`, `train_examples: 21540`):
+## Large-scale validation results (`google/gemma-4-E4B-it`, `train_examples: 21540`):
 
-# IMPORTANT: SINCE I LEAKED THE TRAIN SET WITH A STUPID BUG (SPLIT THE DATASET FROM TRANSLATION RECORDS BUT NOT AUDIO RECORDS), THE FOLLOWING METIRCS IS UNRELIABLE. I WILL RETRAIN THE LORA SOON. ALSO SINCE THERE ARE NO AVALIABLE DETAILED AUDIO METRICS OF GEMMA4, I WILL SWITCH THE BASE MODEL TO QWEN2.5-OMNI
+Testing the dependency of amount of audio records. 
+
+- [Lora checkpoints avaliable here (under testing)](https://drive.google.com/drive/folders/1HSaUpIVDg2vGDtLImYXxgQP03f9Lur4x?usp=sharing)
+- [Metrics are here](lora_metrics/)
 
 <!-- 
 ### Training paramenters

@@ -278,7 +278,7 @@ assistant
 
 只要存在并发或批处理生成，就会有额外风险：同一个请求单独运行和放进 batch 运行时，下一 token 的候选分数可能不完全一致；当候选分数接近时，第一或第二偏好的 token 可能交换位置。这会影响采样，也可能让协议化输出偏离允许格式。本次多批次 vs 单批次调查中，Gemma4 音频文本的这种风险比对照模型和纯文本基线更明显。因此本项目构建推理后端时候会使用约束解码，例如 vLLM guided decoding / structured outputs 或 llama.cpp GBNF grammar，把输出限制在目前支持的六种协议形式内。详情见 [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md)。
 
-## 大规模验证结果 (`google/gemma-4-E2B-it`, `train_examples: 21540`):
+## 大规模验证结果 (`google/gemma-4-E4B-it`, `train_examples: 21540`):
 
 <!--
 ### 训练参数

@@ -282,7 +282,8 @@ assistant
 
 このプロジェクトの推論 backend を作るときは、vLLM guided decoding / structured outputs や llama.cpp GBNF grammar などの制約付きデコードを使い、出力を現在サポートしている 6 種類のプロトコル形式に制限します。詳細は [Gemma 4 multimodal batch-rank note](lessons/gemma4_multimodal_batch_rank_en.md) を参照してください。
 
-## 大規模検証結果 (`google/gemma-4-E2B-it`, `train_examples: 21540`):
+## 大規模検証結果 (`google/gemma-4-E4B-it`, `train_examples: 21540`):
+
 <!-- 
 ### 学習パラメータ
 
